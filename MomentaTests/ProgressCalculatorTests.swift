@@ -14,6 +14,8 @@ struct ProgressCalculatorTests {
     private func client(pacing: PacingMode = .weekdays, goal: MonthlyGoal? = nil) -> ClientConfig {
         ClientConfig(
             id: 1,
+            workspaceID: 101,
+            workspaceName: "Freelance",
             togglName: "Acme",
             displayNameOverride: nil,
             colorHex: "#5B8DEF",
@@ -136,24 +138,31 @@ struct ProgressCalculatorTests {
 
     // MARK: Uncategorized
 
-    @Test func uncategorizedSplitsNoClientFromInactiveClient() {
+    @Test func uncategorizedSplitsByCause() {
         let month = july
         let goal = MonthlyGoal(hourlyRate: 100, input: .hours(80))
-        let enabled = client(goal: goal)
+        let configured = client(goal: goal)
         var disabled = client(goal: goal)
         disabled.id = 2
         disabled.isEnabled = false
+        var needsSetup = client(goal: nil)
+        needsSetup.id = 3
 
         let entries = [
             TimeEntry(id: 1, clientID: nil, start: date(day: 3, hour: 9), stop: date(day: 3, hour: 10)),
             TimeEntry(id: 2, clientID: 2, start: date(day: 3, hour: 11), stop: date(day: 3, hour: 13)),
             TimeEntry(id: 3, clientID: 1, start: date(day: 3, hour: 14), stop: date(day: 3, hour: 15)),
+            TimeEntry(id: 4, clientID: 3, start: date(day: 3, hour: 16), stop: date(day: 3, hour: 19)),
+            // Entry pointing at a client Momenta has never seen: warn like no-client.
+            TimeEntry(id: 5, clientID: 99, start: date(day: 3, hour: 20), stop: date(day: 3, hour: 20).addingTimeInterval(1800)),
         ]
         let summary = ProgressCalculator.uncategorized(
-            entries: entries, clients: [enabled, disabled], month: month, timeZone: utc, now: date(day: 4)
+            entries: entries, clients: [configured, disabled, needsSetup],
+            month: month, timeZone: utc, now: date(day: 4)
         )
-        #expect(summary.noClientHours == 1)
-        #expect(summary.inactiveClientHours == 2)
+        #expect(summary.noClientHours == 1.5)
+        #expect(summary.disabledHours == 2)
+        #expect(summary.needsSetupHours == 3)
     }
 
     // MARK: Aggregate

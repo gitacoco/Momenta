@@ -59,12 +59,14 @@ struct AggregateProgress: Sendable {
     }
 }
 
-/// Hours not attributed to any enabled, configured client, split by cause so
-/// the UI can warn about truly unattributed time without nagging about
-/// deliberately disabled clients.
+/// Hours not counted toward any configured client, split by cause:
+/// - no client (or an unknown client): warn visibly,
+/// - enabled client still lacking rate/goal: hint that setup unlocks the hours,
+/// - deliberately disabled or archived client: excluded silently.
 struct UncategorizedSummary: Sendable {
     var noClientHours: Decimal
-    var inactiveClientHours: Decimal
+    var needsSetupHours: Decimal
+    var disabledHours: Decimal
 }
 
 /// Pure month-progress math. Full normalization and the complete test matrix
@@ -213,21 +215,32 @@ enum ProgressCalculator {
         timeZone: TimeZone,
         now: Date
     ) -> UncategorizedSummary {
-        let activeIDs = Set(clients.filter { $0.isDisplayable(for: month) }.map(\.id))
+        let clientsByID = Dictionary(uniqueKeysWithValues: clients.map { ($0.id, $0) })
         var noClient: Decimal = 0
-        var inactive: Decimal = 0
+        var needsSetup: Decimal = 0
+        var disabled: Decimal = 0
         for entry in entries {
             guard month.contains(entry.start, in: timeZone) else { continue }
             let hours = Decimal(entry.elapsed(asOf: now)) / 3600
-            if let clientID = entry.clientID {
-                if !activeIDs.contains(clientID) {
-                    inactive += hours
-                }
-            } else {
+            guard let clientID = entry.clientID, let client = clientsByID[clientID] else {
+                // No client, or a client Momenta doesn't know about.
                 noClient += hours
+                continue
+            }
+            switch client.state(for: month) {
+            case .configured:
+                break
+            case .needsSetup:
+                needsSetup += hours
+            case .disabled, .archived:
+                disabled += hours
             }
         }
-        return UncategorizedSummary(noClientHours: noClient, inactiveClientHours: inactive)
+        return UncategorizedSummary(
+            noClientHours: noClient,
+            needsSetupHours: needsSetup,
+            disabledHours: disabled
+        )
     }
 
     // MARK: Pacing helpers

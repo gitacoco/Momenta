@@ -18,9 +18,16 @@ struct MenuBarLabel: View {
         guard let aggregate, !aggregate.shares.isEmpty else { return "—" }
         if split {
             return aggregate.shares
-                .map { "\($0.client.displayName.prefix(1)) \(Format.percent($0.fraction))" }
+                .map { "\($0.client.displayName.prefix(1)) \(shareText($0))" }
                 .joined(separator: " · ")
         }
+        // Zero target: e.g. Day view on a weekend when every client paces by
+        // weekdays. Show "no goal" rather than a misleading 0%.
+        guard aggregate.targetRevenue > 0 else { return "—" }
         return Format.percent(aggregate.fraction)
+    }
+
+    private func shareText(_ share: AggregateProgress.ClientShare) -> String {
+        share.targetRevenue > 0 ? Format.percent(share.fraction) : "—"
     }
 }

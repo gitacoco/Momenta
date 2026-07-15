@@ -128,6 +128,10 @@ struct DashboardView: View {
 
     private var needsSetupText: String {
         let names = appState.needsSetupClients.map(\.displayName).joined(separator: ", ")
+        let waiting = appState.uncategorized?.needsSetupHours ?? 0
+        if waiting > 0.05 {
+            return "\(names): set a rate and goal — \(Format.hours(waiting)) waiting to count"
+        }
         return "\(names): set a rate and goal to start tracking"
     }
 

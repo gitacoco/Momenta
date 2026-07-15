@@ -84,6 +84,8 @@ struct ClientConfigTests {
     private func client(goals: [YearMonth: MonthlyGoal], enabled: Bool = true, archived: Bool = false) -> ClientConfig {
         ClientConfig(
             id: 1,
+            workspaceID: 101,
+            workspaceName: "Freelance",
             togglName: "Acme",
             displayNameOverride: nil,
             colorHex: "#5B8DEF",

@@ -13,6 +13,8 @@ struct MockDataProvider: DataProvider {
         return [
             ClientConfig(
                 id: 1,
+                workspaceID: 101,
+                workspaceName: "Freelance",
                 togglName: "Acme Corp",
                 displayNameOverride: nil,
                 colorHex: "#5B8DEF",
@@ -26,6 +28,8 @@ struct MockDataProvider: DataProvider {
             ),
             ClientConfig(
                 id: 2,
+                workspaceID: 101,
+                workspaceName: "Freelance",
                 togglName: "Northwind Traders",
                 displayNameOverride: "Northwind",
                 colorHex: "#F2994A",
@@ -38,6 +42,8 @@ struct MockDataProvider: DataProvider {
             ),
             ClientConfig(
                 id: 3,
+                workspaceID: 101,
+                workspaceName: "Freelance",
                 togglName: "Initech",
                 displayNameOverride: nil,
                 colorHex: "#9B51E0",
@@ -48,6 +54,8 @@ struct MockDataProvider: DataProvider {
             ),
             ClientConfig(
                 id: 4,
+                workspaceID: 102,
+                workspaceName: "Side Projects",
                 togglName: "Globex",
                 displayNameOverride: nil,
                 colorHex: "#27AE60",
@@ -58,6 +66,8 @@ struct MockDataProvider: DataProvider {
             ),
             ClientConfig(
                 id: 5,
+                workspaceID: 102,
+                workspaceName: "Side Projects",
                 togglName: "Umbrella",
                 displayNameOverride: nil,
                 colorHex: "#828282",
@@ -116,6 +126,15 @@ struct MockDataProvider: DataProvider {
                 let hours = rng.double(in: 1.0...2.5)
                 let start = dayStart.addingTimeInterval(15 * 3600)
                 if let entry = makeEntry(id: entryID + 1, clientID: 2, start: start, hours: hours, now: now) {
+                    entryID += 1
+                    entries.append(entry)
+                }
+            }
+
+            // Initech is enabled but lacks a goal: its hours wait for setup.
+            if day % 3 == 0 {
+                let start = dayStart.addingTimeInterval(20 * 3600)
+                if let entry = makeEntry(id: entryID + 1, clientID: 3, start: start, hours: 0.8, now: now) {
                     entryID += 1
                     entries.append(entry)
                 }

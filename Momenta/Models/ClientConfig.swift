@@ -17,8 +17,12 @@ enum ClientState: String, Sendable {
 /// Local configuration attached to a Toggl client. Toggl is the source of truth
 /// for the client's identity; everything else here is Momenta-local.
 struct ClientConfig: Identifiable, Hashable, Codable, Sendable {
-    /// Toggl client ID.
+    /// Toggl client ID (globally unique across workspaces).
     var id: Int
+    /// Workspace the client belongs to. All of the account's workspaces are
+    /// imported; the Clients settings page groups by workspace.
+    var workspaceID: Int
+    var workspaceName: String
     var togglName: String
     var displayNameOverride: String?
     var colorHex: String
