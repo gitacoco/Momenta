@@ -256,10 +256,10 @@ struct SettingsView: View {
                     Text("When the popover opens").tag(true)
                     Text("Manually only").tag(false)
                 }
-            } footer: {
+
                 Text("Toggl's free plan allows 30 API requests per hour. Manual mode spends them only when you ask.")
-                    .font(.caption)
                     .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             SwiftUI.Section("Time") {

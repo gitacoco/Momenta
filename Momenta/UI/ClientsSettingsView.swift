@@ -1,5 +1,4 @@
 import SwiftUI
-import Charts
 import UniformTypeIdentifiers
 
 /// The middle column of Settings → Clients: the full Toggl client list (no
@@ -463,55 +462,61 @@ private struct ClientDetailView: View {
 
     private var pacingSection: some View {
         Section("Pacing") {
-            Picker("Planned progress on", selection: pacingBinding) {
-                Text("Weekdays only").tag(PacingMode.weekdays)
-                Text("Every calendar day").tag(PacingMode.calendarDays)
-            }
-            .pickerStyle(.menu)
+            VStack(alignment: .leading, spacing: 0) {
+                ViewThatFits(in: .horizontal) {
+                    HStack(alignment: .top, spacing: 24) {
+                        Text("Planned progress on")
+                            .fixedSize()
+                        Spacer(minLength: 0)
+                        pacingOptions
+                    }
 
-            VStack(alignment: .leading, spacing: 4) {
-                pacingPreview
-                    .frame(height: 56)
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Planned progress on")
+                        pacingOptions
+                    }
+                }
+                .padding(.bottom, 14)
+
+                Divider()
+
                 Text(pacingCaption)
-                    .font(.caption)
                     .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, 12)
             }
-            .padding(.vertical, 2)
+            .padding(.vertical, 4)
         }
     }
 
-    /// The month's planned goal line under the selected pacing, so the choice
-    /// has a visible consequence before any real data exists.
-    private var pacingPreview: some View {
-        let month = appState.currentMonth
-        let timeZone = appState.timeZone
-        let pacing = appState.config.client(id: client.id)?.pacing ?? .weekdays
-        let weights = ProgressCalculator.dailyWeights(month: month, pacing: pacing, timeZone: timeZone)
-        let total = max(1, weights.reduce(0, +))
-        var cumulative = 0
-        let points: [(day: Int, fraction: Double)] = weights.enumerated().map { index, weight in
-            cumulative += weight
-            return (index + 1, Double(cumulative) / Double(total))
+    private var pacingOptions: some View {
+        HStack(alignment: .top, spacing: 14) {
+            pacingOption(.weekdays, title: "Weekdays only")
+            pacingOption(.calendarDays, title: "Every day")
         }
-        return Chart(points, id: \.day) { point in
-            LineMark(
-                x: .value("Day", point.day),
-                y: .value("Planned", point.fraction)
-            )
-            .lineStyle(StrokeStyle(lineWidth: 1.5, dash: [4, 3]))
-            .foregroundStyle(.secondary)
+        .fixedSize(horizontal: true, vertical: false)
+    }
+
+    private func pacingOption(_ mode: PacingMode, title: LocalizedStringKey) -> some View {
+        PacingOptionButton(
+            title: title,
+            mode: mode,
+            isSelected: currentPacing == mode
+        ) {
+            pacingBinding.wrappedValue = mode
         }
-        .chartXAxis(.hidden)
-        .chartYAxis(.hidden)
+    }
+
+    private var currentPacing: PacingMode {
+        appState.config.client(id: client.id)?.pacing ?? .weekdays
     }
 
     private var pacingCaption: String {
-        let pacing = appState.config.client(id: client.id)?.pacing ?? .weekdays
-        switch pacing {
+        switch currentPacing {
         case .weekdays:
-            return "The goal line stays flat on weekends — days off create no artificial debt."
+            return "On weekends, the goal line stays flat so days off do not create artificial debt."
         case .calendarDays:
-            return "Every day carries the same share of the goal, weekends included."
+            return "Every day carries the same share of the goal, including weekends."
         }
     }
 
@@ -573,6 +578,146 @@ private struct ClientDetailView: View {
 
     private var rateBinding: Binding<Decimal?> {
         Binding { draft.hourlyRate } set: { draft.setRate($0) }
+    }
+}
+
+/// A graphical radio option inspired by System Settings' Appearance picker.
+/// The preview intentionally spans one Monday–Sunday week so the weekend
+/// plateau is immediately visible instead of disappearing in a monthly chart.
+private struct PacingOptionButton: View {
+    let title: LocalizedStringKey
+    let mode: PacingMode
+    let isSelected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            VStack(spacing: 7) {
+                PacingWeekPreview(mode: mode, isSelected: isSelected)
+                    .frame(width: 142, height: 78)
+
+                Text(title)
+                    .font(.callout)
+                    .fontWeight(isSelected ? .semibold : .regular)
+                    .foregroundStyle(isSelected ? .primary : .secondary)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(Text(title))
+        .accessibilityValue(isSelected ? "Selected" : "Not selected")
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+}
+
+private struct PacingWeekPreview: View {
+    let mode: PacingMode
+    let isSelected: Bool
+
+    private let dayLabels = ["M", "T", "W", "T", "F", "S", "S"]
+
+    private var cumulativeFractions: [CGFloat] {
+        switch mode {
+        case .weekdays:
+            return [0.20, 0.40, 0.60, 0.80, 1.00, 1.00, 1.00]
+        case .calendarDays:
+            return (1...7).map { CGFloat($0) / 7 }
+        }
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            ZStack {
+                HStack(spacing: 1) {
+                    ForEach(0..<7, id: \.self) { index in
+                        Rectangle()
+                            .fill(
+                                Color(nsColor: .separatorColor)
+                                    .opacity(index >= 5 ? 0.16 : 0.045)
+                            )
+                            .frame(maxWidth: .infinity)
+                    }
+                }
+                .padding(3)
+
+                Canvas { context, size in
+                    let horizontalInset: CGFloat = 10
+                    let topInset: CGFloat = 12
+                    let bottomInset: CGFloat = 7
+                    let plotWidth = size.width - (horizontalInset * 2)
+                    let plotHeight = max(1, size.height - topInset - bottomInset)
+
+                    var grid = Path()
+                    for index in 0..<7 {
+                        let x = horizontalInset + plotWidth * CGFloat(index) / 6
+                        grid.move(to: CGPoint(x: x, y: topInset))
+                        grid.addLine(to: CGPoint(x: x, y: topInset + plotHeight))
+                    }
+                    context.stroke(
+                        grid,
+                        with: .color(Color(nsColor: .separatorColor).opacity(0.34)),
+                        lineWidth: 0.5
+                    )
+
+                    let points = cumulativeFractions.enumerated().map { index, fraction in
+                        CGPoint(
+                            x: horizontalInset + plotWidth * CGFloat(index) / 6,
+                            y: topInset + ((1 - fraction) * plotHeight)
+                        )
+                    }
+
+                    var line = Path()
+                    for (index, point) in points.enumerated() {
+                        if index == 0 {
+                            line.move(to: point)
+                        } else {
+                            line.addLine(to: point)
+                        }
+                    }
+                    let lineColor = isSelected
+                        ? Color.accentColor
+                        : Color(nsColor: .secondaryLabelColor)
+                    context.stroke(
+                        line,
+                        with: .color(lineColor),
+                        style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round)
+                    )
+
+                    for point in points {
+                        let dot = Path(ellipseIn: CGRect(
+                            x: point.x - 2,
+                            y: point.y - 2,
+                            width: 4,
+                            height: 4
+                        ))
+                        context.fill(dot, with: .color(lineColor))
+                    }
+                }
+                .padding(.top, 3)
+            }
+
+            HStack(spacing: 0) {
+                ForEach(Array(dayLabels.enumerated()), id: \.offset) { index, label in
+                    Text(label)
+                        .font(.caption2.monospaced())
+                        .foregroundStyle(index >= 5 ? .secondary : .tertiary)
+                        .frame(maxWidth: .infinity)
+                }
+            }
+            .padding(.horizontal, 3)
+            .padding(.bottom, 5)
+        }
+        .background(Color(nsColor: .controlBackgroundColor))
+        .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                .strokeBorder(
+                    isSelected ? Color.accentColor : Color(nsColor: .separatorColor),
+                    lineWidth: isSelected ? 3 : 1
+                )
+        }
+        .shadow(color: .black.opacity(0.06), radius: 2, y: 1)
+        .accessibilityHidden(true)
     }
 }
 
