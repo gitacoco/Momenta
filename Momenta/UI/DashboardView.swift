@@ -89,7 +89,14 @@ struct DashboardView: View {
                     // an explicit reason why there's nothing to show.
                     ForEach(appState.visibleClients) { client in
                         if let progress = progressByID[client.id] {
-                            ClientCardView(progress: progress, unit: appState.displayUnit)
+                            ClientCardView(
+                                progress: progress,
+                                unit: appState.displayUnit,
+                                onEditGoal: {
+                                    appState.pendingSettingsDestination = .clients(clientID: client.id)
+                                    openSettingsWindow()
+                                }
+                            )
                         } else if client.state(for: appState.selectedMonth) == .needsSetup {
                             setupCard(client)
                         } else if client.state(for: appState.selectedMonth) == .configured {
@@ -211,7 +218,7 @@ struct DashboardView: View {
             .buttonStyle(.borderless)
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 6)
+        .padding(.vertical, 10)
     }
 
     /// One line that always tells the user how trustworthy the numbers are

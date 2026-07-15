@@ -158,7 +158,7 @@ struct SettingsView: View {
                 .keyboardShortcut("]", modifiers: .command)
             }
             .controlGroupStyle(.navigation)
-            .controlSize(.large)
+            .controlSize(.extraLarge)
             .labelStyle(.iconOnly)
         }
     }

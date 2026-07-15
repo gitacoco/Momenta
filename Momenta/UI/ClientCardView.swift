@@ -2,16 +2,24 @@ import SwiftUI
 import Charts
 
 /// One client's monthly progress: planned vs actual chart plus pace metrics.
-/// The ahead/behind delta is drawn where it exists — as the gap between the
-/// two lines at "today" — and restated in the metrics row.
+/// The filled gap between the lines communicates ahead/behind status, while
+/// the current logged value is labeled directly at the end of the actual line.
 struct ClientCardView: View {
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.colorSchemeContrast) private var colorSchemeContrast
+    @State private var isGoalChipHovered = false
 
     var progress: ClientProgress
     var unit: DisplayUnit
+    var onEditGoal: () -> Void
 
     private var clientColor: Color {
-        Color(hex: progress.client.colorHex)
+        AccessibleBrandColor.color(
+            hex: progress.client.colorHex,
+            colorScheme: colorScheme,
+            colorSchemeContrast: colorSchemeContrast,
+            isAhead: progress.isAhead
+        )
     }
 
     private var deltaColor: Color {
@@ -44,7 +52,9 @@ struct ClientCardView: View {
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
+                goalChip
             }
+            .padding(.bottom, 8)
             chart
                 .frame(height: 110)
             metrics
@@ -56,6 +66,26 @@ struct ClientCardView: View {
         )
     }
 
+    private var goalChip: some View {
+        Button(action: onEditGoal) {
+            HStack(spacing: 4) {
+                Text("Goal")
+                    .foregroundStyle(.secondary)
+                Text(goalMetricText ?? "Not set")
+                    .fontWeight(.semibold)
+            }
+            .font(.callout.monospacedDigit())
+            .padding(.horizontal, 8)
+            .frame(minHeight: 26)
+            .contentShape(Capsule())
+        }
+        .buttonStyle(GoalChipButtonStyle(isHovered: isGoalChipHovered))
+        .onHover { isGoalChipHovered = $0 }
+        .help("Edit \(progress.client.displayName) goal")
+        .accessibilityLabel("Edit goal, \(goalMetricText ?? "not set")")
+        .accessibilityHint("Opens this client's goal settings")
+    }
+
     // MARK: Chart
 
     private var todayPoint: DayProgressPoint? {
@@ -65,6 +95,16 @@ struct ClientCardView: View {
     private var chart: some View {
         Chart {
             if progress.goal != nil {
+                // Color the variance only through the latest elapsed day;
+                // the planned line continues through the rest of the month.
+                ForEach(progress.points.filter { $0.actualHours != nil }) { point in
+                    AreaMark(
+                        x: .value("Day", point.day),
+                        yStart: .value("Actual", value(actual: point)),
+                        yEnd: .value("Planned", value(planned: point))
+                    )
+                    .foregroundStyle(deltaColor.opacity(0.1))
+                }
                 ForEach(progress.points) { point in
                     LineMark(
                         x: .value("Day", point.day),
@@ -76,11 +116,6 @@ struct ClientCardView: View {
                 }
             }
             ForEach(progress.points.filter { $0.actualHours != nil }) { point in
-                AreaMark(
-                    x: .value("Day", point.day),
-                    y: .value("Actual", value(actual: point))
-                )
-                .foregroundStyle(clientColor.opacity(0.12))
                 LineMark(
                     x: .value("Day", point.day),
                     y: .value("Actual", value(actual: point)),
@@ -89,35 +124,34 @@ struct ClientCardView: View {
                 .lineStyle(StrokeStyle(lineWidth: 2))
                 .foregroundStyle(clientColor)
             }
-            // The delta, drawn where it lives: the gap between actual and
-            // planned at today, colored by ahead/behind. Only meaningful
-            // when the month has a goal.
-            if progress.goal != nil, let today = todayPoint {
-                let actualY = value(actual: today)
-                let plannedY = value(planned: today)
-                RuleMark(
-                    x: .value("Today", today.day),
-                    yStart: .value("From", min(actualY, plannedY)),
-                    yEnd: .value("To", max(actualY, plannedY))
-                )
-                .lineStyle(StrokeStyle(lineWidth: 2, lineCap: .round))
-                .foregroundStyle(deltaColor.opacity(0.75))
-                .annotation(position: .trailing, alignment: .leading, spacing: 4) {
-                    Text(deltaShortText)
-                        .font(.caption2.weight(.semibold).monospacedDigit())
-                        .foregroundStyle(deltaColor)
-                }
+            if let today = todayPoint {
                 PointMark(
                     x: .value("Today", today.day),
-                    y: .value("Actual", actualY)
+                    y: .value("Actual", value(actual: today))
                 )
                 .symbolSize(36)
                 .foregroundStyle(clientColor)
+                .annotation(position: .trailing, alignment: .leading, spacing: 4) {
+                    Text(actualText)
+                        .font(.caption.weight(.bold).monospacedDigit())
+                        .foregroundStyle(clientColor)
+                }
             }
         }
         .chartLegend(.hidden)
+        .chartXAxis {
+            // Dates provide enough horizontal orientation; vertical grid
+            // lines add noise without improving the comparison.
+            AxisMarks {
+                AxisValueLabel()
+            }
+        }
         .chartYAxis {
-            AxisMarks(position: .trailing)
+            AxisMarks(position: .trailing) {
+                AxisGridLine()
+                AxisValueLabel()
+                    .foregroundStyle(Color(nsColor: .secondaryLabelColor))
+            }
         }
     }
 
@@ -137,13 +171,6 @@ struct ClientCardView: View {
 
     // MARK: Metrics
 
-    private var deltaShortText: String {
-        switch unit {
-        case .revenue: return Format.signedCurrency(progress.deltaRevenue ?? 0, code: currencyCode)
-        case .hours: return Format.signedHours(progress.deltaHours ?? 0)
-        }
-    }
-
     private var deltaLineText: String? {
         guard let deltaRevenue = progress.deltaRevenue, let deltaHours = progress.deltaHours else {
             return nil
@@ -158,28 +185,25 @@ struct ClientCardView: View {
 
     private var metrics: some View {
         HStack(alignment: .firstTextBaseline) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(actualText)
-                    .font(.title3.weight(.semibold).monospacedDigit())
-                Text(goalText)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+            if let paceValue {
+                HStack(alignment: .firstTextBaseline, spacing: 2) {
+                    Text(paceValue)
+                        .font(.title3.weight(.semibold).monospacedDigit())
+                    Text("/day to goal")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
             }
             Spacer()
-            VStack(alignment: .trailing, spacing: 2) {
-                if let deltaLineText {
-                    HStack(alignment: .firstTextBaseline, spacing: 5) {
-                        Image(systemName: deltaIcon)
-                            .foregroundStyle(deltaColor)
-                        Text(deltaLineText)
-                            .foregroundStyle(.primary)
-                    }
-                    .font(.callout.weight(.semibold).monospacedDigit())
-                    .accessibilityElement(children: .combine)
+            if let deltaLineText {
+                HStack(alignment: .firstTextBaseline, spacing: 5) {
+                    Image(systemName: deltaIcon)
+                        .foregroundStyle(deltaColor)
+                    Text(deltaLineText)
+                        .foregroundStyle(.primary)
                 }
-                Text(secondaryText)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                .font(.callout.weight(.semibold).monospacedDigit())
+                .accessibilityElement(children: .combine)
             }
         }
     }
@@ -191,26 +215,47 @@ struct ClientCardView: View {
         }
     }
 
-    private var goalText: String {
-        guard let goal = progress.goal else {
-            return "no goal recorded for this month"
-        }
+    private var goalMetricText: String? {
+        guard let goal = progress.goal else { return nil }
         switch unit {
-        case .revenue: return "of \(Format.currency(goal.revenue, code: currencyCode))"
-        case .hours: return "of \(Format.hours(goal.hours))"
+        case .revenue: return Format.currency(goal.revenue, code: currencyCode)
+        case .hours: return Format.hours(goal.hours)
         }
     }
 
-    private var secondaryText: String {
-        let logged: String
+    private var paceValue: String? {
+        guard let requiredDaily = progress.requiredDailyHours else { return nil }
         switch unit {
-        case .revenue: logged = "\(Format.hours(progress.actualHours)) logged"
-        case .hours: logged = "\(Format.currency(progress.actualRevenue, code: currencyCode)) earned"
+        case .revenue:
+            let requiredDailyRevenue = requiredDaily * progress.hourlyRate
+            return Format.currency(requiredDailyRevenue, code: currencyCode)
+        case .hours:
+            return Format.hours(requiredDaily)
         }
-        guard let requiredDaily = progress.requiredDailyHours else {
-            return logged
-        }
-        return "\(Format.hours(requiredDaily))/day to goal · \(logged)"
+    }
+}
+
+private struct GoalChipButtonStyle: ButtonStyle {
+    var isHovered: Bool
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .background(
+                Capsule()
+                    .fill(Color.primary.opacity(backgroundOpacity(isPressed: configuration.isPressed)))
+            )
+            .overlay {
+                Capsule()
+                    .stroke(Color.primary.opacity(isHovered ? 0.14 : 0), lineWidth: 0.5)
+            }
+            .scaleEffect(configuration.isPressed ? 0.97 : 1)
+            .animation(.easeOut(duration: 0.1), value: configuration.isPressed)
+            .animation(.easeOut(duration: 0.12), value: isHovered)
+    }
+
+    private func backgroundOpacity(isPressed: Bool) -> Double {
+        if isPressed { return 0.16 }
+        return isHovered ? 0.1 : 0
     }
 }
 
