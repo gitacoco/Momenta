@@ -1,0 +1,299 @@
+import Foundation
+
+/// One day on the chart: cumulative planned values span the whole month,
+/// cumulative actual values exist only for elapsed days.
+struct DayProgressPoint: Identifiable, Sendable {
+    var day: Date
+    var plannedHours: Decimal
+    var plannedRevenue: Decimal
+    var actualHours: Decimal?
+    var actualRevenue: Decimal?
+
+    var id: Date { day }
+}
+
+/// A client's computed progress for one month.
+struct ClientProgress: Identifiable, Sendable {
+    var client: ClientConfig
+    var month: YearMonth
+    var goal: MonthlyGoal
+    var points: [DayProgressPoint]
+    var actualHours: Decimal
+    var actualRevenue: Decimal
+    var plannedHoursToDate: Decimal
+    var plannedRevenueToDate: Decimal
+    /// Average hours per remaining scheduled day needed to hit the goal.
+    var requiredDailyHours: Decimal
+
+    var id: Int { client.id }
+
+    var deltaHours: Decimal { actualHours - plannedHoursToDate }
+    var deltaRevenue: Decimal { actualRevenue - plannedRevenueToDate }
+    var isAhead: Bool { deltaHours >= 0 }
+}
+
+/// Cross-client aggregate for the menu bar. Revenue-only: rates differ per
+/// client, so hours cannot be meaningfully summed across clients.
+struct AggregateProgress: Sendable {
+    struct ClientShare: Identifiable, Sendable {
+        var client: ClientConfig
+        var actualRevenue: Decimal
+        var targetRevenue: Decimal
+
+        var id: Int { client.id }
+
+        var fraction: Double {
+            guard targetRevenue > 0 else { return 0 }
+            return (actualRevenue / targetRevenue).doubleValue
+        }
+    }
+
+    var shares: [ClientShare]
+
+    var actualRevenue: Decimal { shares.reduce(0) { $0 + $1.actualRevenue } }
+    var targetRevenue: Decimal { shares.reduce(0) { $0 + $1.targetRevenue } }
+
+    var fraction: Double {
+        guard targetRevenue > 0 else { return 0 }
+        return (actualRevenue / targetRevenue).doubleValue
+    }
+}
+
+/// Hours not attributed to any enabled, configured client, split by cause so
+/// the UI can warn about truly unattributed time without nagging about
+/// deliberately disabled clients.
+struct UncategorizedSummary: Sendable {
+    var noClientHours: Decimal
+    var inactiveClientHours: Decimal
+}
+
+/// Pure month-progress math. Full normalization and the complete test matrix
+/// land with BON-14; the API here is the one the UI builds against.
+enum ProgressCalculator {
+
+    // MARK: Per-client progress
+
+    static func progress(
+        for client: ClientConfig,
+        entries: [TimeEntry],
+        month: YearMonth,
+        timeZone: TimeZone,
+        now: Date
+    ) -> ClientProgress? {
+        guard let goal = client.goal(for: month), goal.isComplete else { return nil }
+
+        let calendar = YearMonth.calendar(in: timeZone)
+        let monthStart = month.start(in: timeZone)
+        let dayCount = month.dayCount(in: timeZone)
+        let weights = dailyWeights(month: month, pacing: client.pacing, timeZone: timeZone)
+        let totalWeight = weights.reduce(0, +)
+
+        // Actual hours per day, attributed by entry start time.
+        var actualByDay = [Int: Decimal](minimumCapacity: dayCount)
+        for entry in entries where entry.clientID == client.id {
+            guard month.contains(entry.start, in: timeZone) else { continue }
+            let dayIndex = calendar.dateComponents([.day], from: monthStart, to: entry.start).day ?? 0
+            let hours = Decimal(entry.elapsed(asOf: now)) / 3600
+            actualByDay[dayIndex, default: 0] += hours
+        }
+
+        var points: [DayProgressPoint] = []
+        points.reserveCapacity(dayCount)
+        var cumulativePlannedWeight = 0
+        var cumulativeActualHours: Decimal = 0
+        var plannedHoursToDate: Decimal = 0
+        var plannedRevenueToDate: Decimal = 0
+
+        for dayIndex in 0..<dayCount {
+            guard let dayStart = calendar.date(byAdding: .day, value: dayIndex, to: monthStart) else { continue }
+            cumulativePlannedWeight += weights[dayIndex]
+            let plannedFraction = totalWeight == 0
+                ? 0
+                : Decimal(cumulativePlannedWeight) / Decimal(totalWeight)
+            let plannedHours = goal.hours * plannedFraction
+            let plannedRevenue = goal.revenue * plannedFraction
+
+            let dayHasElapsed = dayStart <= now
+            var actualHours: Decimal?
+            var actualRevenue: Decimal?
+            if dayHasElapsed {
+                cumulativeActualHours += actualByDay[dayIndex] ?? 0
+                actualHours = cumulativeActualHours
+                actualRevenue = cumulativeActualHours * goal.hourlyRate
+                plannedHoursToDate = plannedHours
+                plannedRevenueToDate = plannedRevenue
+            }
+
+            points.append(DayProgressPoint(
+                day: dayStart,
+                plannedHours: plannedHours,
+                plannedRevenue: plannedRevenue,
+                actualHours: actualHours,
+                actualRevenue: actualRevenue
+            ))
+        }
+
+        let actualHours = cumulativeActualHours
+        let remainingHours = max(0, goal.hours - actualHours)
+        let remainingWeight = remainingScheduledDays(
+            month: month, pacing: client.pacing, timeZone: timeZone, after: now
+        )
+        let requiredDaily = remainingWeight > 0 ? remainingHours / Decimal(remainingWeight) : remainingHours
+
+        return ClientProgress(
+            client: client,
+            month: month,
+            goal: goal,
+            points: points,
+            actualHours: actualHours,
+            actualRevenue: actualHours * goal.hourlyRate,
+            plannedHoursToDate: plannedHoursToDate,
+            plannedRevenueToDate: plannedRevenueToDate,
+            requiredDailyHours: requiredDaily
+        )
+    }
+
+    // MARK: Menu bar aggregate
+
+    /// Aggregate progress across all configured clients for the slice of the
+    /// month selected by `period` (today / this week / whole month).
+    static func aggregate(
+        clients: [ClientConfig],
+        entries: [TimeEntry],
+        month: YearMonth,
+        period: AggregationPeriod,
+        timeZone: TimeZone,
+        now: Date
+    ) -> AggregateProgress {
+        let interval = periodInterval(period: period, month: month, timeZone: timeZone, now: now)
+
+        var shares: [AggregateProgress.ClientShare] = []
+        for client in clients where client.isDisplayable(for: month) {
+            guard let goal = client.goal(for: month) else { continue }
+            let weights = dailyWeights(month: month, pacing: client.pacing, timeZone: timeZone)
+            let totalWeight = weights.reduce(0, +)
+            let calendar = YearMonth.calendar(in: timeZone)
+            let monthStart = month.start(in: timeZone)
+
+            // Planned revenue for the days of the month that fall inside the period.
+            var periodWeight = 0
+            for dayIndex in 0..<weights.count {
+                guard let dayStart = calendar.date(byAdding: .day, value: dayIndex, to: monthStart) else { continue }
+                if dayStart >= interval.start && dayStart < interval.end {
+                    periodWeight += weights[dayIndex]
+                }
+            }
+            let target = totalWeight == 0
+                ? Decimal(0)
+                : goal.revenue * Decimal(periodWeight) / Decimal(totalWeight)
+
+            // Actual revenue from entries starting inside the period.
+            var hours: Decimal = 0
+            for entry in entries where entry.clientID == client.id {
+                if entry.start >= interval.start && entry.start < interval.end {
+                    hours += Decimal(entry.elapsed(asOf: now)) / 3600
+                }
+            }
+
+            shares.append(AggregateProgress.ClientShare(
+                client: client,
+                actualRevenue: hours * goal.hourlyRate,
+                targetRevenue: target
+            ))
+        }
+        return AggregateProgress(shares: shares)
+    }
+
+    // MARK: Uncategorized
+
+    static func uncategorized(
+        entries: [TimeEntry],
+        clients: [ClientConfig],
+        month: YearMonth,
+        timeZone: TimeZone,
+        now: Date
+    ) -> UncategorizedSummary {
+        let activeIDs = Set(clients.filter { $0.isDisplayable(for: month) }.map(\.id))
+        var noClient: Decimal = 0
+        var inactive: Decimal = 0
+        for entry in entries {
+            guard month.contains(entry.start, in: timeZone) else { continue }
+            let hours = Decimal(entry.elapsed(asOf: now)) / 3600
+            if let clientID = entry.clientID {
+                if !activeIDs.contains(clientID) {
+                    inactive += hours
+                }
+            } else {
+                noClient += hours
+            }
+        }
+        return UncategorizedSummary(noClientHours: noClient, inactiveClientHours: inactive)
+    }
+
+    // MARK: Pacing helpers
+
+    /// Weight of each day of the month under the pacing mode (0 or 1).
+    static func dailyWeights(month: YearMonth, pacing: PacingMode, timeZone: TimeZone) -> [Int] {
+        let calendar = YearMonth.calendar(in: timeZone)
+        let monthStart = month.start(in: timeZone)
+        return (0..<month.dayCount(in: timeZone)).map { dayIndex in
+            guard pacing == .weekdays else { return 1 }
+            guard let dayStart = calendar.date(byAdding: .day, value: dayIndex, to: monthStart) else { return 0 }
+            let weekday = calendar.component(.weekday, from: dayStart)
+            return (weekday == 1 || weekday == 7) ? 0 : 1
+        }
+    }
+
+    /// Scheduled days remaining in the month strictly after today (today is
+    /// treated as available for catching up, so it is included).
+    static func remainingScheduledDays(
+        month: YearMonth,
+        pacing: PacingMode,
+        timeZone: TimeZone,
+        after now: Date
+    ) -> Int {
+        let calendar = YearMonth.calendar(in: timeZone)
+        let monthStart = month.start(in: timeZone)
+        let weights = dailyWeights(month: month, pacing: pacing, timeZone: timeZone)
+        var remaining = 0
+        for dayIndex in 0..<weights.count {
+            guard let dayStart = calendar.date(byAdding: .day, value: dayIndex, to: monthStart) else { continue }
+            guard let dayEnd = calendar.date(byAdding: .day, value: 1, to: dayStart) else { continue }
+            if dayEnd > now {
+                remaining += weights[dayIndex]
+            }
+        }
+        return remaining
+    }
+
+    /// The date interval the menu bar aggregates over, clipped to the month.
+    static func periodInterval(
+        period: AggregationPeriod,
+        month: YearMonth,
+        timeZone: TimeZone,
+        now: Date
+    ) -> DateInterval {
+        let calendar = YearMonth.calendar(in: timeZone)
+        let monthInterval = DateInterval(start: month.start(in: timeZone), end: month.end(in: timeZone))
+        switch period {
+        case .month:
+            return monthInterval
+        case .week:
+            guard let week = calendar.dateInterval(of: .weekOfYear, for: now) else { return monthInterval }
+            let start = max(week.start, monthInterval.start)
+            let end = min(week.end, monthInterval.end)
+            return end > start ? DateInterval(start: start, end: end) : monthInterval
+        case .day:
+            guard let day = calendar.dateInterval(of: .day, for: now) else { return monthInterval }
+            let start = max(day.start, monthInterval.start)
+            let end = min(day.end, monthInterval.end)
+            return end > start ? DateInterval(start: start, end: end) : monthInterval
+        }
+    }
+}
+
+extension Decimal {
+    var doubleValue: Double {
+        NSDecimalNumber(decimal: self).doubleValue
+    }
+}
