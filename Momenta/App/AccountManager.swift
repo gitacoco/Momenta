@@ -31,6 +31,9 @@ final class AccountManager {
 
     private(set) var state: ConnectionState = .disconnected
     private(set) var lastSyncAt: Date?
+    /// Bumped on every connect/disconnect so consumers holding token-bound
+    /// resources (API clients, caches) know to rebuild them.
+    private(set) var generation = 0
 
     init(
         tokenStore: any TokenStore = KeychainTokenStore(),
@@ -76,6 +79,7 @@ final class AccountManager {
             if let data = try? JSONEncoder().encode(snapshot) {
                 defaults.set(data, forKey: Self.snapshotKey)
             }
+            generation += 1
             state = .connected(snapshot)
         } catch let error as TogglAPIError {
             state = .failed(error)
@@ -91,6 +95,7 @@ final class AccountManager {
         defaults.removeObject(forKey: Self.snapshotKey)
         defaults.removeObject(forKey: Self.lastSyncKey)
         lastSyncAt = nil
+        generation += 1
         state = .disconnected
     }
 

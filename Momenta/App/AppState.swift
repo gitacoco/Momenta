@@ -4,7 +4,10 @@ import Observation
 @MainActor
 @Observable
 final class AppState {
-    private let provider: any DataProvider
+    /// Demo data source used before any Toggl account is connected.
+    private let fallbackProvider: any DataProvider
+    private var togglProvider: TogglDataProvider?
+    private var togglProviderGeneration = -1
     let account: AccountManager
     let config: ConfigStore
 
@@ -24,7 +27,7 @@ final class AppState {
         account: AccountManager = AccountManager(),
         config: ConfigStore = ConfigStore()
     ) {
-        self.provider = provider
+        self.fallbackProvider = provider
         self.account = account
         self.config = config
         self.selectedMonth = YearMonth(containing: Date(), timeZone: .current)
@@ -51,19 +54,44 @@ final class AppState {
         YearMonth(containing: Date(), timeZone: timeZone)
     }
 
+    // MARK: Data source selection
+
+    /// The provider to fetch with right now:
+    /// - connected: the Toggl-backed provider (rebuilt when the account changes),
+    /// - never connected (no real configs): the demo provider,
+    /// - disconnected but real configs exist: nil — no fetching, cached
+    ///   snapshots stay visible.
+    private func activeProvider() -> (any DataProvider)? {
+        if account.isConnected, let api = account.apiClient() {
+            if togglProvider == nil || togglProviderGeneration != account.generation {
+                togglProvider = TogglDataProvider(api: api)
+                togglProviderGeneration = account.generation
+            }
+            return togglProvider
+        }
+        togglProvider = nil
+        return config.clients.isEmpty ? fallbackProvider : nil
+    }
+
     // MARK: Loading
 
-    /// Full refresh: clients, available months, current month, and (if
-    /// different) the selected month. Called when the popover opens or the
-    /// user asks for a refresh.
+    /// Full refresh: available months, current month, and (if needed) the
+    /// selected month. Called when the popover opens or the user asks for a
+    /// refresh.
     func refresh() async {
+        guard let provider = activeProvider() else {
+            // Offline-by-choice (disconnected, real data cached): no fetching.
+            availableMonths = Set(snapshots.keys).union([currentMonth]).sorted()
+            return
+        }
         isLoading = true
         defer { isLoading = false }
         let now = Date()
         do {
-            availableMonths = try await provider.availableMonths(asOf: now, timeZone: timeZone)
+            let fetchable = try await provider.availableMonths(asOf: now, timeZone: timeZone)
+            availableMonths = Set(fetchable).union(snapshots.keys).sorted()
             snapshots[currentMonth] = try await provider.loadSnapshot(for: currentMonth, timeZone: timeZone, now: now)
-            if selectedMonth != currentMonth {
+            if selectedMonth != currentMonth, snapshots[selectedMonth] == nil {
                 snapshots[selectedMonth] = try await provider.loadSnapshot(for: selectedMonth, timeZone: timeZone, now: now)
             }
             lastError = nil
@@ -110,6 +138,7 @@ final class AppState {
     }
 
     private func loadSelectedMonth() async {
+        guard let provider = activeProvider() else { return }
         isLoading = true
         defer { isLoading = false }
         do {
