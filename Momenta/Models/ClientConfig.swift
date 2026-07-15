@@ -68,8 +68,31 @@ struct ClientConfig: Identifiable, Hashable, Codable, Sendable {
         return .configured
     }
 
-    /// Whether this client participates in aggregation and dashboard cards for the month.
+    /// The rate used to price a month's hours. Goals never write backward,
+    /// but the hourly rate is a fact about the client: months before the
+    /// first recorded version borrow the earliest later version's rate so
+    /// historical hours still convert to revenue.
+    func effectiveRate(for month: YearMonth) -> Decimal? {
+        if let goal = goal(for: month), goal.hourlyRate > 0 {
+            return goal.hourlyRate
+        }
+        return goalHistory
+            .filter { $0.key > month && $0.value.hourlyRate > 0 }
+            .min { $0.key < $1.key }?
+            .value.hourlyRate
+    }
+
+    /// Whether this client gets a dashboard card for the month: fully
+    /// configured, or a historical month viewable through a backfilled rate
+    /// (actuals only, no goal line).
     func isDisplayable(for month: YearMonth) -> Bool {
-        state(for: month) == .configured
+        switch state(for: month) {
+        case .configured:
+            return true
+        case .needsSetup:
+            return effectiveRate(for: month) != nil
+        case .disabled, .archived:
+            return false
+        }
     }
 }

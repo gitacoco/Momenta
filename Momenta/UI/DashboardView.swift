@@ -34,13 +34,13 @@ struct DashboardView: View {
         if let uncategorized = appState.uncategorized, uncategorized.noClientHours > 0.05 {
             content += 50
         }
+        let progressByID = appState.progressByClientID
         for client in appState.visibleClients {
-            switch client.state(for: appState.selectedMonth) {
-            case .configured:
-                content += appState.progressByClientID[client.id] != nil ? 226 : 48
-            case .needsSetup:
+            if progressByID[client.id] != nil {
+                content += 226
+            } else if client.state(for: appState.selectedMonth) != .disabled {
                 content += 48
-            case .disabled, .archived:
+            } else {
                 continue
             }
             content += 10
@@ -107,20 +107,16 @@ struct DashboardView: View {
                     if let uncategorized = appState.uncategorized, uncategorized.noClientHours > 0.05 {
                         uncategorizedBanner(hours: uncategorized.noClientHours)
                     }
-                    // Every enabled client gets a row — data, setup prompt,
-                    // or an explicit reason why there's nothing to show.
+                    // Every enabled client gets a row — data (including
+                    // rate-backfilled historical months), a setup prompt, or
+                    // an explicit reason why there's nothing to show.
                     ForEach(appState.visibleClients) { client in
-                        switch client.state(for: appState.selectedMonth) {
-                        case .configured:
-                            if let progress = progressByID[client.id] {
-                                ClientCardView(progress: progress, unit: appState.displayUnit)
-                            } else {
-                                noDataCard(client)
-                            }
-                        case .needsSetup:
+                        if let progress = progressByID[client.id] {
+                            ClientCardView(progress: progress, unit: appState.displayUnit)
+                        } else if client.state(for: appState.selectedMonth) == .needsSetup {
                             setupCard(client)
-                        case .disabled, .archived:
-                            EmptyView()
+                        } else if client.state(for: appState.selectedMonth) == .configured {
+                            noDataCard(client)
                         }
                     }
                 }

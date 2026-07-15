@@ -107,14 +107,35 @@ final class StatusItemController: NSObject {
     }
 }
 
-/// Opens the SwiftUI Settings scene from AppKit contexts (status item menu,
-/// popover buttons hosted outside a SwiftUI scene).
+/// The settings window is managed directly (an NSWindow hosting SettingsView)
+/// because a menu bar app has no reliable public way to summon the SwiftUI
+/// Settings scene from AppKit contexts.
+@MainActor
+final class SettingsWindowController {
+    static let shared = SettingsWindowController()
+    private var window: NSWindow?
+
+    func show() {
+        if window == nil {
+            let hosting = NSHostingController(
+                rootView: SettingsView().environment(AppState.shared)
+            )
+            let window = NSWindow(contentViewController: hosting)
+            window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
+            window.title = "Momenta Settings"
+            window.isReleasedWhenClosed = false
+            window.center()
+            window.setFrameAutosaveName("MomentaSettingsWindow")
+            self.window = window
+        }
+        NSApp.activate()
+        window?.makeKeyAndOrderFront(nil)
+    }
+}
+
 @MainActor
 func openSettingsWindow() {
-    NSApp.activate()
-    if !NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil) {
-        _ = NSApp.sendAction(Selector(("showPreferencesWindow:")), to: nil, from: nil)
-    }
+    SettingsWindowController.shared.show()
 }
 
 /// Thin wrapper so the status item label participates in SwiftUI observation.

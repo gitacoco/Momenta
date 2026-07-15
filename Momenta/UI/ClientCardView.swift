@@ -52,14 +52,16 @@ struct ClientCardView: View {
 
     private var chart: some View {
         Chart {
-            ForEach(progress.points) { point in
-                LineMark(
-                    x: .value("Day", point.day),
-                    y: .value("Planned", value(planned: point)),
-                    series: .value("Series", "Planned")
-                )
-                .lineStyle(StrokeStyle(lineWidth: 1.5, dash: [4, 3]))
-                .foregroundStyle(.secondary)
+            if progress.goal != nil {
+                ForEach(progress.points) { point in
+                    LineMark(
+                        x: .value("Day", point.day),
+                        y: .value("Planned", value(planned: point)),
+                        series: .value("Series", "Planned")
+                    )
+                    .lineStyle(StrokeStyle(lineWidth: 1.5, dash: [4, 3]))
+                    .foregroundStyle(.secondary)
+                }
             }
             ForEach(progress.points.filter { $0.actualHours != nil }) { point in
                 AreaMark(
@@ -76,8 +78,9 @@ struct ClientCardView: View {
                 .foregroundStyle(clientColor)
             }
             // The delta, drawn where it lives: the gap between actual and
-            // planned at today, colored by ahead/behind.
-            if let today = todayPoint {
+            // planned at today, colored by ahead/behind. Only meaningful
+            // when the month has a goal.
+            if progress.goal != nil, let today = todayPoint {
                 let actualY = value(actual: today)
                 let plannedY = value(planned: today)
                 RuleMark(
@@ -108,8 +111,8 @@ struct ClientCardView: View {
 
     private func value(planned point: DayProgressPoint) -> Double {
         switch unit {
-        case .revenue: return point.plannedRevenue.doubleValue
-        case .hours: return point.plannedHours.doubleValue
+        case .revenue: return (point.plannedRevenue ?? 0).doubleValue
+        case .hours: return (point.plannedHours ?? 0).doubleValue
         }
     }
 
@@ -124,16 +127,19 @@ struct ClientCardView: View {
 
     private var deltaShortText: String {
         switch unit {
-        case .revenue: return Format.signedCurrency(progress.deltaRevenue, code: currencyCode)
-        case .hours: return Format.signedHours(progress.deltaHours)
+        case .revenue: return Format.signedCurrency(progress.deltaRevenue ?? 0, code: currencyCode)
+        case .hours: return Format.signedHours(progress.deltaHours ?? 0)
         }
     }
 
-    private var deltaLineText: String {
+    private var deltaLineText: String? {
+        guard let deltaRevenue = progress.deltaRevenue, let deltaHours = progress.deltaHours else {
+            return nil
+        }
         let magnitude: String
         switch unit {
-        case .revenue: magnitude = Format.currency(abs(progress.deltaRevenue), code: currencyCode)
-        case .hours: magnitude = Format.hours(abs(progress.deltaHours))
+        case .revenue: magnitude = Format.currency(abs(deltaRevenue), code: currencyCode)
+        case .hours: magnitude = Format.hours(abs(deltaHours))
         }
         return "\(progress.isAhead ? "▲" : "▼") \(magnitude) \(progress.isAhead ? "ahead" : "behind")"
     }
@@ -143,15 +149,17 @@ struct ClientCardView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(actualText)
                     .font(.title3.weight(.semibold).monospacedDigit())
-                Text("of \(goalText)")
+                Text(goalText)
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
             Spacer()
             VStack(alignment: .trailing, spacing: 2) {
-                Text(deltaLineText)
-                    .font(.callout.weight(.semibold).monospacedDigit())
-                    .foregroundStyle(deltaColor)
+                if let deltaLineText {
+                    Text(deltaLineText)
+                        .font(.callout.weight(.semibold).monospacedDigit())
+                        .foregroundStyle(deltaColor)
+                }
                 Text(secondaryText)
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -167,9 +175,12 @@ struct ClientCardView: View {
     }
 
     private var goalText: String {
+        guard let goal = progress.goal else {
+            return "no goal recorded for this month"
+        }
         switch unit {
-        case .revenue: return Format.currency(progress.goal.revenue, code: currencyCode)
-        case .hours: return Format.hours(progress.goal.hours)
+        case .revenue: return "of \(Format.currency(goal.revenue, code: currencyCode))"
+        case .hours: return "of \(Format.hours(goal.hours))"
         }
     }
 
@@ -179,7 +190,10 @@ struct ClientCardView: View {
         case .revenue: logged = "\(Format.hours(progress.actualHours)) logged"
         case .hours: logged = "\(Format.currency(progress.actualRevenue, code: currencyCode)) earned"
         }
-        return "\(Format.hours(progress.requiredDailyHours))/day to goal · \(logged)"
+        guard let requiredDaily = progress.requiredDailyHours else {
+            return logged
+        }
+        return "\(Format.hours(requiredDaily))/day to goal · \(logged)"
     }
 }
 

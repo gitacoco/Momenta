@@ -1,35 +1,39 @@
 import Foundation
 
-/// One day on the chart: cumulative planned values span the whole month,
-/// cumulative actual values exist only for elapsed days.
+/// One day on the chart: cumulative planned values span the whole month
+/// (nil when the month has no recorded goal), cumulative actual values exist
+/// only for elapsed days.
 struct DayProgressPoint: Identifiable, Sendable {
     var day: Date
-    var plannedHours: Decimal
-    var plannedRevenue: Decimal
+    var plannedHours: Decimal?
+    var plannedRevenue: Decimal?
     var actualHours: Decimal?
     var actualRevenue: Decimal?
 
     var id: Date { day }
 }
 
-/// A client's computed progress for one month.
+/// A client's computed progress for one month. `goal` is nil for historical
+/// months before the first recorded version: hours are priced with the
+/// backfilled rate, but no goal line, delta, or pace exists.
 struct ClientProgress: Identifiable, Sendable {
     var client: ClientConfig
     var month: YearMonth
-    var goal: MonthlyGoal
+    var goal: MonthlyGoal?
+    var hourlyRate: Decimal
     var points: [DayProgressPoint]
     var actualHours: Decimal
     var actualRevenue: Decimal
-    var plannedHoursToDate: Decimal
-    var plannedRevenueToDate: Decimal
+    var plannedHoursToDate: Decimal?
+    var plannedRevenueToDate: Decimal?
     /// Average hours per remaining scheduled day needed to hit the goal.
-    var requiredDailyHours: Decimal
+    var requiredDailyHours: Decimal?
 
     var id: Int { client.id }
 
-    var deltaHours: Decimal { actualHours - plannedHoursToDate }
-    var deltaRevenue: Decimal { actualRevenue - plannedRevenueToDate }
-    var isAhead: Bool { deltaHours >= 0 }
+    var deltaHours: Decimal? { plannedHoursToDate.map { actualHours - $0 } }
+    var deltaRevenue: Decimal? { plannedRevenueToDate.map { actualRevenue - $0 } }
+    var isAhead: Bool { (deltaHours ?? 0) >= 0 }
 }
 
 /// Cross-client aggregate for the menu bar. Revenue-only: rates differ per
@@ -82,7 +86,11 @@ enum ProgressCalculator {
         timeZone: TimeZone,
         now: Date
     ) -> ClientProgress? {
-        guard let goal = client.goal(for: month), goal.isComplete else { return nil }
+        let recordedGoal = client.goal(for: month)
+        let goal: MonthlyGoal? = (recordedGoal?.isComplete == true) ? recordedGoal : nil
+        // No goal for the month: still price actuals with the backfilled
+        // rate; without even a rate there is nothing meaningful to show.
+        guard let rate = goal?.hourlyRate ?? client.effectiveRate(for: month) else { return nil }
 
         let calendar = YearMonth.calendar(in: timeZone)
         let monthStart = month.start(in: timeZone)
@@ -103,8 +111,8 @@ enum ProgressCalculator {
         points.reserveCapacity(dayCount)
         var cumulativePlannedWeight = 0
         var cumulativeActualHours: Decimal = 0
-        var plannedHoursToDate: Decimal = 0
-        var plannedRevenueToDate: Decimal = 0
+        var plannedHoursToDate: Decimal?
+        var plannedRevenueToDate: Decimal?
 
         for dayIndex in 0..<dayCount {
             guard let dayStart = calendar.date(byAdding: .day, value: dayIndex, to: monthStart) else { continue }
@@ -112,8 +120,8 @@ enum ProgressCalculator {
             let plannedFraction = totalWeight == 0
                 ? 0
                 : Decimal(cumulativePlannedWeight) / Decimal(totalWeight)
-            let plannedHours = goal.hours * plannedFraction
-            let plannedRevenue = goal.revenue * plannedFraction
+            let plannedHours = goal.map { $0.hours * plannedFraction }
+            let plannedRevenue = goal.map { $0.revenue * plannedFraction }
 
             let dayHasElapsed = dayStart <= now
             var actualHours: Decimal?
@@ -121,7 +129,7 @@ enum ProgressCalculator {
             if dayHasElapsed {
                 cumulativeActualHours += actualByDay[dayIndex] ?? 0
                 actualHours = cumulativeActualHours
-                actualRevenue = cumulativeActualHours * goal.hourlyRate
+                actualRevenue = cumulativeActualHours * rate
                 plannedHoursToDate = plannedHours
                 plannedRevenueToDate = plannedRevenue
             }
@@ -136,19 +144,22 @@ enum ProgressCalculator {
         }
 
         let actualHours = cumulativeActualHours
-        let remainingHours = max(0, goal.hours - actualHours)
-        let remainingWeight = remainingScheduledDays(
-            month: month, pacing: client.pacing, timeZone: timeZone, after: now
-        )
-        let requiredDaily = remainingWeight > 0 ? remainingHours / Decimal(remainingWeight) : remainingHours
+        let requiredDaily: Decimal? = goal.map { goal in
+            let remainingHours = max(0, goal.hours - actualHours)
+            let remainingWeight = remainingScheduledDays(
+                month: month, pacing: client.pacing, timeZone: timeZone, after: now
+            )
+            return remainingWeight > 0 ? remainingHours / Decimal(remainingWeight) : remainingHours
+        }
 
         return ClientProgress(
             client: client,
             month: month,
             goal: goal,
+            hourlyRate: rate,
             points: points,
             actualHours: actualHours,
-            actualRevenue: actualHours * goal.hourlyRate,
+            actualRevenue: actualHours * rate,
             plannedHoursToDate: plannedHoursToDate,
             plannedRevenueToDate: plannedRevenueToDate,
             requiredDailyHours: requiredDaily
@@ -170,8 +181,8 @@ enum ProgressCalculator {
         let interval = periodInterval(period: period, month: month, timeZone: timeZone, now: now)
 
         var shares: [AggregateProgress.ClientShare] = []
-        for client in clients where client.isDisplayable(for: month) {
-            guard let goal = client.goal(for: month) else { continue }
+        for client in clients where client.state(for: month) == .configured {
+            guard let goal = client.goal(for: month), goal.isComplete else { continue }
             let weights = dailyWeights(month: month, pacing: client.pacing, timeZone: timeZone)
             let totalWeight = weights.reduce(0, +)
             let calendar = YearMonth.calendar(in: timeZone)
@@ -227,6 +238,9 @@ enum ProgressCalculator {
                 noClient += hours
                 continue
             }
+            // Anything rendered on a card (including rate-backfilled
+            // historical months) counts as categorized.
+            guard !client.isDisplayable(for: month) else { continue }
             switch client.state(for: month) {
             case .configured:
                 break

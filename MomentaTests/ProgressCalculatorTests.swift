@@ -68,14 +68,54 @@ struct ProgressCalculatorTests {
         // planned line flat at Friday's value.
         #expect(progress.points[3].plannedHours == progress.points[2].plannedHours)
         #expect(progress.points[4].plannedHours == progress.points[2].plannedHours)
-        #expect(progress.points[5].plannedHours > progress.points[4].plannedHours)
+        #expect(progress.points[5].plannedHours! > progress.points[4].plannedHours!)
     }
 
-    @Test func noProgressForClientWithoutCompleteGoal() {
+    @Test func noProgressForClientWithoutAnyRate() {
         let progress = ProgressCalculator.progress(
             for: client(goal: nil), entries: [], month: july, timeZone: utc, now: date(day: 10)
         )
         #expect(progress == nil)
+    }
+
+    @Test func historicalMonthBackfillsRateButNotGoal() {
+        // Goal first recorded in July; June has tracked hours. June must show
+        // actuals priced at July's rate — but no goal line, delta, or pace.
+        let june = YearMonth(year: 2026, month: 6)
+        let config = client(goal: MonthlyGoal(hourlyRate: 120, input: .hours(80)))
+        let juneStart = june.start(in: utc)
+        let entries = [
+            TimeEntry(id: 1, clientID: 1, start: juneStart.addingTimeInterval(9 * 3600),
+                      stop: juneStart.addingTimeInterval(12 * 3600)),
+        ]
+        let progress = ProgressCalculator.progress(
+            for: config, entries: entries, month: june, timeZone: utc, now: date(day: 10)
+        )!
+        #expect(progress.goal == nil)
+        #expect(progress.hourlyRate == 120)
+        #expect(progress.actualHours == 3)
+        #expect(progress.actualRevenue == 360)
+        #expect(progress.deltaHours == nil)
+        #expect(progress.requiredDailyHours == nil)
+        #expect(progress.points.allSatisfy { $0.plannedHours == nil })
+    }
+
+    @Test func backfilledMonthCountsAsDisplayableAndCategorized() {
+        let june = YearMonth(year: 2026, month: 6)
+        let config = client(goal: MonthlyGoal(hourlyRate: 120, input: .hours(80)))
+        #expect(config.isDisplayable(for: june))
+
+        // Its entries are on a card, so they are not "uncategorized".
+        let juneStart = june.start(in: utc)
+        let entries = [
+            TimeEntry(id: 1, clientID: 1, start: juneStart.addingTimeInterval(9 * 3600),
+                      stop: juneStart.addingTimeInterval(10 * 3600)),
+        ]
+        let summary = ProgressCalculator.uncategorized(
+            entries: entries, clients: [config], month: june, timeZone: utc, now: date(day: 1)
+        )
+        #expect(summary.needsSetupHours == 0)
+        #expect(summary.noClientHours == 0)
     }
 
     // MARK: Actuals
