@@ -19,7 +19,7 @@ struct GoalEditorSection: View {
     @Binding var draft: GoalDraft
     var focus: FocusState<ClientField?>.Binding
 
-    @State private var showScopeDialog = false
+    @State private var showRetroDialog = false
     @State private var savedFeedback = false
 
     private var month: YearMonth {
@@ -62,7 +62,7 @@ struct GoalEditorSection: View {
             HStack(alignment: .firstTextBaseline) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Monthly Goal")
-                    Text("Changes apply from \(Format.monthTitle(month, timeZone: appState.timeZone)) onward.")
+                    Text("Saves as you edit; changes apply from \(Format.monthTitle(month, timeZone: appState.timeZone)) onward.")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                         .textCase(nil)
@@ -74,25 +74,41 @@ struct GoalEditorSection: View {
                         .foregroundStyle(.green)
                         .transition(.opacity)
                 }
-                Button("Save") {
-                    save()
+                if hasHistoricalMonths {
+                    Menu {
+                        Button("Apply Current Goal to All Past Months…", role: .destructive) {
+                            showRetroDialog = true
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis.circle")
+                    }
+                    .menuIndicator(.hidden)
+                    .fixedSize()
                 }
-                .disabled(draft.monthlyGoal == nil || !isDirty)
             }
         }
-        .confirmationDialog(
-            "Past months have their own recorded goals",
-            isPresented: $showScopeDialog
-        ) {
-            Button("This Month and Onward") {
-                apply(retroactive: false)
+        // Auto-save when focus leaves any goal-related field.
+        .onChange(of: focus.wrappedValue) { oldValue, newValue in
+            let goalFields: Set<ClientField> = [.rate, .hours, .revenue]
+            let leftGoalField = oldValue.map { goalFields.contains($0) } ?? false
+            let enteredGoalField = newValue.map { goalFields.contains($0) } ?? false
+            if leftGoalField && !enteredGoalField {
+                commitIfDirty()
             }
-            Button("Also Rewrite All Past Months", role: .destructive) {
+        }
+        .onDisappear {
+            commitIfDirty()
+        }
+        .confirmationDialog(
+            "Rewrite all past months?",
+            isPresented: $showRetroDialog
+        ) {
+            Button("Rewrite All Past Months", role: .destructive) {
                 apply(retroactive: true)
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("By default past months keep the goals recorded for them. You can also rewrite every past month to this new goal.")
+            Text("Every recorded past month will be overwritten with the current rate and goal. Normal edits never touch past months.")
         }
     }
 
@@ -113,6 +129,7 @@ struct GoalEditorSection: View {
                 .frame(width: width)
                 .focused(focus, equals: focusTag)
                 .labelsHidden()
+                .onSubmit(commitIfDirty)
         }
     }
 
@@ -128,17 +145,16 @@ struct GoalEditorSection: View {
 
     // MARK: Saving
 
-    private func save() {
-        guard draft.monthlyGoal != nil else { return }
-        if hasHistoricalMonths {
-            showScopeDialog = true
-        } else {
-            apply(retroactive: false)
-        }
+    /// Auto-save: a complete, changed draft persists as soon as editing
+    /// pauses. Scope is always "this month and onward"; rewriting history
+    /// hides behind the explicit menu + confirmation.
+    private func commitIfDirty() {
+        guard draft.monthlyGoal != nil, isDirty else { return }
+        apply(retroactive: false)
     }
 
     private func apply(retroactive: Bool) {
-        guard let goal = draft.monthlyGoal else { return }
+        guard let goal = draft.monthlyGoal ?? client.goal(for: month) else { return }
         appState.config.setGoal(goal, forClient: client.id, from: month, retroactive: retroactive)
         withAnimation {
             savedFeedback = true

@@ -44,7 +44,7 @@ struct SettingsView: View {
                 Label(section.label, systemImage: section.icon)
                     .tag(section)
             }
-            .navigationSplitViewColumnWidth(min: 170, ideal: 180, max: 220)
+            .navigationSplitViewColumnWidth(180)
             // Settings sidebars never collapse.
             .toolbar(removing: .sidebarToggle)
         } detail: {
@@ -85,47 +85,60 @@ struct SettingsView: View {
     private var displaySettings: some View {
         @Bindable var appState = appState
         return Form {
-            Picker("Menu bar aggregation", selection: $appState.displaySettings.aggregationPeriod) {
-                ForEach(AggregationPeriod.allCases) { period in
-                    Text(period.label).tag(period)
+            // Hero: the menu bar item itself — everything below configures it.
+            SwiftUI.Section {
+                VStack(spacing: 10) {
+                    MenuBarLabel(
+                        aggregate: appState.menuBarAggregate,
+                        split: appState.displaySettings.perClientSplit
+                    )
+                    .font(.title3)
+                    .padding(.horizontal, 18)
+                    .padding(.vertical, 9)
+                    .background(Capsule().fill(.quaternary.opacity(0.6)))
+                    Text("Live preview of your menu bar item")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 14)
             }
-            .pickerStyle(.segmented)
 
-            Toggle("Split per client", isOn: $appState.displaySettings.perClientSplit)
+            SwiftUI.Section("Menu bar") {
+                Picker("Aggregation period", selection: $appState.displaySettings.aggregationPeriod) {
+                    ForEach(AggregationPeriod.allCases) { period in
+                        Text(period.label).tag(period)
+                    }
+                }
+                .pickerStyle(.segmented)
 
-            Picker("Refresh data", selection: $appState.displaySettings.autoRefreshOnOpen) {
-                Text("When the popover opens").tag(true)
-                Text("Manually only").tag(false)
+                Toggle("Split per client", isOn: $appState.displaySettings.perClientSplit)
             }
-            LabeledContent("") {
+
+            SwiftUI.Section {
+                Picker("Refresh data", selection: $appState.displaySettings.autoRefreshOnOpen) {
+                    Text("When the popover opens").tag(true)
+                    Text("Manually only").tag(false)
+                }
+            } footer: {
                 Text("Toggl's free plan allows 30 API requests per hour. Manual mode spends them only when you ask.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.trailing)
             }
 
-            LabeledContent("Menu bar preview") {
-                MenuBarLabel(
-                    aggregate: appState.menuBarAggregate,
-                    split: appState.displaySettings.perClientSplit
-                )
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
-                .background(RoundedRectangle(cornerRadius: 6).fill(.quaternary.opacity(0.5)))
-            }
-
-            Picker("Time zone", selection: $appState.displaySettings.timeZoneIdentifier) {
-                Text("System (\(TimeZone.current.identifier))").tag(String?.none)
-                ForEach(TimeZone.knownTimeZoneIdentifiers, id: \.self) { identifier in
-                    Text(identifier).tag(String?.some(identifier))
+            SwiftUI.Section("Time") {
+                Picker("Time zone", selection: $appState.displaySettings.timeZoneIdentifier) {
+                    Text("System (\(TimeZone.current.identifier))").tag(String?.none)
+                    ForEach(TimeZone.knownTimeZoneIdentifiers, id: \.self) { identifier in
+                        Text(identifier).tag(String?.some(identifier))
+                    }
                 }
-            }
 
-            LabeledContent("Current month boundaries") {
-                Text(monthBoundaryExample)
-                    .monospacedDigit()
-                    .foregroundStyle(.secondary)
+                LabeledContent("Current month boundaries") {
+                    Text(monthBoundaryExample)
+                        .monospacedDigit()
+                        .foregroundStyle(.secondary)
+                }
             }
         }
         .formStyle(.grouped)

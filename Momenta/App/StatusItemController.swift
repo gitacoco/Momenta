@@ -107,37 +107,15 @@ final class StatusItemController: NSObject {
     }
 }
 
-/// The settings window is managed directly (an NSWindow hosting SettingsView)
-/// because a menu bar app has no reliable public way to summon the SwiftUI
-/// Settings scene from AppKit contexts.
-@MainActor
-final class SettingsWindowController {
-    static let shared = SettingsWindowController()
-    private var window: NSWindow?
-
-    func show() {
-        if window == nil {
-            let hosting = NSHostingController(
-                rootView: SettingsView().environment(AppState.shared)
-            )
-            // Let SwiftUI drive the window's toolbar and title so the
-            // NavigationSplitView gets the native glass heading treatment.
-            hosting.sceneBridgingOptions = [.toolbars, .title]
-            let window = NSWindow(contentViewController: hosting)
-            window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
-            window.isReleasedWhenClosed = false
-            window.center()
-            window.setFrameAutosaveName("MomentaSettingsWindow")
-            self.window = window
-        }
-        NSApp.activate()
-        window?.makeKeyAndOrderFront(nil)
-    }
-}
-
+/// Summons the SwiftUI settings window scene from AppKit contexts (status
+/// item menu, popover buttons) through the app's URL scheme — the supported
+/// way to open a scene without a SwiftUI environment at hand.
 @MainActor
 func openSettingsWindow() {
-    SettingsWindowController.shared.show()
+    NSApp.activate()
+    if let url = URL(string: "momenta://settings") {
+        NSWorkspace.shared.open(url)
+    }
 }
 
 /// Thin wrapper so the status item label participates in SwiftUI observation.

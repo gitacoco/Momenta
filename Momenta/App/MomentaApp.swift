@@ -5,12 +5,17 @@ struct MomentaApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
     var body: some Scene {
-        Settings {
+        // A real SwiftUI window scene so the settings window gets the full
+        // native treatment (glass toolbar, sheets, resize constraints). It is
+        // summoned via the momenta://settings URL from AppKit contexts and
+        // never opens on its own at launch.
+        Window("Momenta Settings", id: "settings") {
             SettingsView()
                 .environment(AppState.shared)
         }
-        // Freely resizable above the content's minimum size.
         .windowResizability(.contentMinSize)
+        .defaultLaunchBehavior(.suppressed)
+        .handlesExternalEvents(matching: ["settings"])
     }
 }
 
