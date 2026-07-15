@@ -5,6 +5,8 @@ import Charts
 /// The ahead/behind delta is drawn where it exists — as the gap between the
 /// two lines at "today" — and restated in the metrics row.
 struct ClientCardView: View {
+    @Environment(\.colorScheme) private var colorScheme
+
     var progress: ClientProgress
     var unit: DisplayUnit
 
@@ -13,7 +15,17 @@ struct ClientCardView: View {
     }
 
     private var deltaColor: Color {
-        progress.isAhead ? .green : .red
+        switch (progress.isAhead, colorScheme) {
+        case (true, .light): Color(hex: "#24A148")
+        case (true, .dark): Color(hex: "#42BE65")
+        case (false, .light): Color(hex: "#DA1E28")
+        case (false, .dark): Color(hex: "#FA4D56")
+        @unknown default: Color(hex: progress.isAhead ? "#24A148" : "#DA1E28")
+        }
+    }
+
+    private var deltaIcon: String {
+        progress.isAhead ? "arrow.up.circle.fill" : "arrow.down.circle.fill"
     }
 
     private var currencyCode: String {
@@ -141,7 +153,7 @@ struct ClientCardView: View {
         case .revenue: magnitude = Format.currency(abs(deltaRevenue), code: currencyCode)
         case .hours: magnitude = Format.hours(abs(deltaHours))
         }
-        return "\(progress.isAhead ? "▲" : "▼") \(magnitude) \(progress.isAhead ? "ahead" : "behind")"
+        return "\(magnitude) \(progress.isAhead ? "ahead" : "behind")"
     }
 
     private var metrics: some View {
@@ -156,9 +168,14 @@ struct ClientCardView: View {
             Spacer()
             VStack(alignment: .trailing, spacing: 2) {
                 if let deltaLineText {
-                    Text(deltaLineText)
-                        .font(.callout.weight(.semibold).monospacedDigit())
-                        .foregroundStyle(deltaColor)
+                    HStack(alignment: .firstTextBaseline, spacing: 5) {
+                        Image(systemName: deltaIcon)
+                            .foregroundStyle(deltaColor)
+                        Text(deltaLineText)
+                            .foregroundStyle(.primary)
+                    }
+                    .font(.callout.weight(.semibold).monospacedDigit())
+                    .accessibilityElement(children: .combine)
                 }
                 Text(secondaryText)
                     .font(.caption)
