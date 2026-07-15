@@ -31,7 +31,7 @@ enum TogglAPIError: Error, Equatable, LocalizedError {
         case .unauthorized:
             return "Toggl rejected the API token. Check the token and reconnect."
         case .rateLimited:
-            return "Toggl API limit reached. Try again in a minute."
+            return "Toggl API quota reached (free plan: 30 requests/hour)."
         case .offline:
             return "You appear to be offline."
         case .server(let status):
@@ -137,11 +137,9 @@ struct TogglAPIClient: Sendable {
             return data
         case 401, 403:
             throw TogglAPIError.unauthorized
-        case 402:
-            // Toggl answers 402 on endpoints/parameters outside the
-            // workspace's plan. Include the path so the culprit is obvious.
-            throw TogglAPIError.other("Toggl declined \(path) (HTTP 402 — may need a paid plan).")
-        case 429:
+        case 402, 429:
+            // Toggl signals the free plan's hourly request quota with 402
+            // ("payment required") as well as the conventional 429.
             throw TogglAPIError.rateLimited
         case 500...599:
             throw TogglAPIError.server(status: response.statusCode)

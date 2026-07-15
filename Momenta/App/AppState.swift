@@ -73,9 +73,13 @@ final class AppState {
         // The last successful snapshots stay visible offline and on relaunch.
         snapshots = snapshotCache.load()
         selectedMonth = YearMonth(containing: Date(), timeZone: settings.timeZone)
+        availableMonths = Set(snapshots.keys)
+            .union([YearMonth(containing: Date(), timeZone: settings.timeZone)])
+            .sorted()
         if autoRefresh {
             Task {
-                await self.refresh()
+                // Launch refresh respects manual-only mode too.
+                await self.refreshIfNeeded()
             }
         }
     }
@@ -119,9 +123,11 @@ final class AppState {
 
     // MARK: Loading
 
-    /// Popover-open path: throttled so repeatedly opening and closing the
-    /// popover cannot burn through the API quota. Manual refresh bypasses.
+    /// Popover-open path: disabled entirely in manual-refresh mode, and
+    /// throttled otherwise so repeatedly opening and closing the popover
+    /// cannot burn through the API quota. Manual refresh bypasses both.
     func refreshIfNeeded() async {
+        guard displaySettings.autoRefreshOnOpen else { return }
         if let last = lastAutoRefreshAt,
            Date().timeIntervalSince(last) < Self.minAutoRefreshInterval {
             return

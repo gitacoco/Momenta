@@ -31,21 +31,22 @@ struct TogglDataProviderTests {
         date.formatted(.iso8601)
     }
 
-    private func makeProvider(now: Date, includeRunning: Bool = true) -> (TogglDataProvider, RoutingTransport) {
+    private func makeProvider(now: Date) -> (TogglDataProvider, RoutingTransport) {
         let julyStart = july.start(in: utc)
         let juneEntry = iso(julyStart.addingTimeInterval(-3600))       // June 30, 23:00Z
         let julyEntry = iso(julyStart.addingTimeInterval(9 * 3600))    // July 1, 09:00Z
+        // The running entry (id 9) rides along in the ranged response, like
+        // Toggl returns it; there is no separate /current fetch.
+        let runningStart = iso(min(now.addingTimeInterval(-1800), july.end(in: utc).addingTimeInterval(-1800)))
         let entriesJSON = """
         [
           {"id":1,"workspace_id":101,"project_id":31,"start":"\(julyEntry)","stop":"\(iso(julyStart.addingTimeInterval(12 * 3600)))","duration":10800,"description":"in month"},
-          {"id":2,"workspace_id":101,"project_id":31,"start":"\(juneEntry)","stop":"\(iso(julyStart))","duration":3600,"description":"before month"}
+          {"id":2,"workspace_id":101,"project_id":31,"start":"\(juneEntry)","stop":"\(iso(julyStart))","duration":3600,"description":"before month"},
+          {"id":9,"workspace_id":101,"project_id":32,"start":"\(runningStart)","stop":null,"duration":-1784127600,"description":"live"}
         ]
         """
-        let runningJSON = includeRunning
-            ? #"{"id":9,"workspace_id":101,"project_id":32,"start":"\#(iso(now.addingTimeInterval(-1800)))","stop":null,"duration":-1784127600,"description":"live"}"#
-            : "null"
         let transport = RoutingTransport(routes: [
-            ("time_entries/current", runningJSON),
+            ("time_entries/current", "null"),
             ("time_entries", entriesJSON),
             ("workspaces/101/projects", #"[{"id":31,"workspace_id":101,"client_id":7,"name":"Website","active":true},{"id":32,"workspace_id":101,"client_id":null,"name":"Internal","active":true}]"#),
             ("workspaces", #"[{"id":101,"name":"Freelance"}]"#),
@@ -54,9 +55,9 @@ struct TogglDataProviderTests {
         return (provider, transport)
     }
 
-    @Test func currentMonthSnapshotFiltersNormalizesAndMergesRunningEntry() async throws {
+    @Test func currentMonthSnapshotFiltersAndNormalizes() async throws {
         let now = july.start(in: utc).addingTimeInterval(14 * 86_400)
-        let (provider, _) = makeProvider(now: now)
+        let (provider, transport) = makeProvider(now: now)
 
         let snapshot = try await provider.loadSnapshot(for: july, timeZone: utc, now: now)
 
@@ -67,15 +68,8 @@ struct TogglDataProviderTests {
         #expect(snapshot.entries[1].clientID == nil)    // project without client
         #expect(snapshot.entries[1].isRunning)
         #expect(snapshot.month == july)
-    }
-
-    @Test func historicalMonthSkipsRunningEntryEndpoint() async throws {
-        // "Now" is September: July is historical.
-        let now = july.next.next.start(in: utc).addingTimeInterval(5 * 86_400)
-        let (provider, transport) = makeProvider(now: now)
-
-        _ = try await provider.loadSnapshot(for: july, timeZone: utc, now: now)
-
+        // Quota economy: the running entry comes from the ranged query, no
+        // separate /current request is ever made.
         #expect(transport.hits["time_entries/current"] == nil)
         #expect(transport.hits["time_entries"] == 1)
     }

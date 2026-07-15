@@ -88,6 +88,17 @@ struct SettingsView: View {
 
             Toggle("Split per client", isOn: $appState.displaySettings.perClientSplit)
 
+            Picker("Refresh data", selection: $appState.displaySettings.autoRefreshOnOpen) {
+                Text("When the popover opens").tag(true)
+                Text("Manually only").tag(false)
+            }
+            LabeledContent("") {
+                Text("Toggl's free plan allows 30 API requests per hour. Manual mode spends them only when you ask.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.trailing)
+            }
+
             LabeledContent("Menu bar preview") {
                 MenuBarLabel(
                     aggregate: appState.menuBarAggregate,

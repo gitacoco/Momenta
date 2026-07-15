@@ -49,15 +49,10 @@ struct TogglDataProvider: DataProvider {
             return TimeEntrySnapshot(month: month, fetchedAt: now, entries: [])
         }
 
-        var dtos = try await api.timeEntries(from: from, to: to)
-
-        // The running entry matters only for the month happening right now;
-        // make sure it is present even if the ranged query dropped it.
-        if month.contains(now, in: timeZone),
-           let running = try await api.currentTimeEntry(),
-           !dtos.contains(where: { $0.id == running.id }) {
-            dtos.append(running)
-        }
+        // The ranged query includes the running entry (its start is inside
+        // the range), so no separate /current call — every request counts
+        // against the free plan's 30/hour quota.
+        let dtos = try await api.timeEntries(from: from, to: to)
 
         let projects = try await catalog.projects(now: now)
         let entries = TogglNormalizer.normalize(entries: dtos, projects: projects)
