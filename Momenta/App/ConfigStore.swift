@@ -56,26 +56,41 @@ final class ConfigStore {
 
     /// Merges the fetched Toggl client list into local configs:
     /// - new clients appear disabled (nothing enters the display unopted),
-    /// - existing clients update identity fields but keep local config,
+    /// - existing clients update identity fields but keep local config and,
+    ///   crucially, their manual ordering,
     /// - clients gone from Toggl are kept as archived while local goal
     ///   history exists, otherwise dropped entirely.
     func merge(workspaces: [TogglWorkspace], togglClients: [TogglClientDTO]) {
         let workspaceNames = Dictionary(uniqueKeysWithValues: workspaces.map { ($0.id, $0.name) })
-        let existingByID = Dictionary(uniqueKeysWithValues: clients.map { ($0.id, $0) })
-        var merged: [ClientConfig] = []
-        var seen = Set<Int>()
+        let fetchedByID = Dictionary(uniqueKeysWithValues: togglClients.map { ($0.id, $0) })
 
-        for dto in togglClients {
-            seen.insert(dto.id)
-            let archivedInToggl = dto.archived == true
-            if var existing = existingByID[dto.id] {
-                existing.togglName = dto.name
-                existing.workspaceID = dto.wid
-                existing.workspaceName = workspaceNames[dto.wid] ?? existing.workspaceName
-                existing.isArchivedInToggl = archivedInToggl
-                merged.append(existing)
-            } else {
-                merged.append(ClientConfig(
+        // Existing clients stay in their current (possibly user-arranged) order.
+        var merged: [ClientConfig] = clients.compactMap { old in
+            if let dto = fetchedByID[old.id] {
+                var updated = old
+                updated.togglName = dto.name
+                updated.workspaceID = dto.wid
+                updated.workspaceName = workspaceNames[dto.wid] ?? old.workspaceName
+                updated.isArchivedInToggl = dto.archived == true
+                return updated
+            }
+            guard !old.goalHistory.isEmpty else { return nil }
+            var archived = old
+            archived.isArchivedInToggl = true
+            archived.isEnabled = false
+            return archived
+        }
+
+        // Genuinely new clients append at the end, alphabetically per workspace.
+        let knownIDs = Set(clients.map(\.id))
+        let newcomers = togglClients
+            .filter { !knownIDs.contains($0.id) }
+            .sorted {
+                (workspaceNames[$0.wid] ?? "", $0.name.lowercased())
+                    < (workspaceNames[$1.wid] ?? "", $1.name.lowercased())
+            }
+            .map { dto in
+                ClientConfig(
                     id: dto.id,
                     workspaceID: dto.wid,
                     workspaceName: workspaceNames[dto.wid] ?? "",
@@ -83,23 +98,30 @@ final class ConfigStore {
                     displayNameOverride: nil,
                     colorHex: Self.defaultColor(for: dto.id),
                     isEnabled: false,
-                    isArchivedInToggl: archivedInToggl,
+                    isArchivedInToggl: dto.archived == true,
                     pacing: .weekdays,
                     goalHistory: [:]
-                ))
+                )
             }
-        }
+        merged += newcomers
 
-        for old in clients where !seen.contains(old.id) {
-            guard !old.goalHistory.isEmpty else { continue }
-            var archived = old
-            archived.isArchivedInToggl = true
-            archived.isEnabled = false
-            merged.append(archived)
-        }
+        clients = merged
+        persist()
+    }
 
-        clients = merged.sorted {
-            ($0.workspaceName, $0.togglName.lowercased()) < ($1.workspaceName, $1.togglName.lowercased())
+    /// Reorders a displayed subset (one sidebar section) by drag and drop.
+    /// `ids` is the subset in its current display order; positions of items
+    /// outside the subset are untouched.
+    func move(ids: [Int], fromOffsets: IndexSet, toOffset: Int) {
+        var reordered = ids
+        reordered.move(fromOffsets: fromOffsets, toOffset: toOffset)
+        let members = Set(ids)
+        var replacements = reordered.makeIterator()
+        clients = clients.map { existing in
+            guard members.contains(existing.id),
+                  let nextID = replacements.next(),
+                  let replacement = client(id: nextID) else { return existing }
+            return replacement
         }
         persist()
     }

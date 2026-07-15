@@ -106,6 +106,44 @@ struct ConfigStoreTests {
         #expect(store.clients[0].isArchivedInToggl)
     }
 
+    // MARK: Ordering
+
+    @Test func moveReordersClientsAndPersists() {
+        let defaults = freshDefaults()
+        let store = ConfigStore(defaults: defaults)
+        store.merge(workspaces: workspaces, togglClients: [
+            TogglClientDTO(id: 1, wid: 101, name: "Alpha", archived: false),
+            TogglClientDTO(id: 2, wid: 101, name: "Beta", archived: false),
+            TogglClientDTO(id: 3, wid: 101, name: "Gamma", archived: false),
+        ])
+
+        // Drag Gamma to the front.
+        store.move(ids: [1, 2, 3], fromOffsets: IndexSet(integer: 2), toOffset: 0)
+        #expect(store.clients.map(\.id) == [3, 1, 2])
+
+        let relaunched = ConfigStore(defaults: defaults)
+        #expect(relaunched.clients.map(\.id) == [3, 1, 2])
+    }
+
+    @Test func mergePreservesManualOrderAndAppendsNewcomers() {
+        let store = ConfigStore(defaults: freshDefaults())
+        store.merge(workspaces: workspaces, togglClients: [
+            TogglClientDTO(id: 1, wid: 101, name: "Alpha", archived: false),
+            TogglClientDTO(id: 2, wid: 101, name: "Beta", archived: false),
+        ])
+        store.move(ids: [1, 2], fromOffsets: IndexSet(integer: 1), toOffset: 0)
+        #expect(store.clients.map(\.id) == [2, 1])
+
+        // A later refresh must not shuffle the user's arrangement; new
+        // clients simply append.
+        store.merge(workspaces: workspaces, togglClients: [
+            TogglClientDTO(id: 1, wid: 101, name: "Alpha", archived: false),
+            TogglClientDTO(id: 2, wid: 101, name: "Beta", archived: false),
+            TogglClientDTO(id: 3, wid: 101, name: "Aardvark", archived: false),
+        ])
+        #expect(store.clients.map(\.id) == [2, 1, 3])
+    }
+
     // MARK: Persistence
 
     @Test func configsSurviveRelaunch() {

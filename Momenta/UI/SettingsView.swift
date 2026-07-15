@@ -42,20 +42,21 @@ struct SettingsView: View {
             .frame(width: 170)
 
             Divider()
+                .ignoresSafeArea(.container, edges: .top)
 
             Group {
                 switch selection {
                 case .account:
-                    AccountSettingsView()
+                    pane(title: "Account") { AccountSettingsView() }
                 case .clients:
                     ClientsSettingsView()
                 case .display:
-                    displaySettings
+                    pane(title: "Display") { displaySettings }
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .frame(minWidth: 680, minHeight: 440)
+        .frame(minWidth: 720, maxWidth: .infinity, minHeight: 480, maxHeight: .infinity)
         .onAppear(perform: consumeDestination)
         .onChange(of: appState.pendingSettingsDestination) {
             consumeDestination()
@@ -73,6 +74,14 @@ struct SettingsView: View {
             selection = .clients
         case nil:
             break
+        }
+    }
+
+    /// Every content pane carries a header naming the selected page.
+    private func pane(title: String, @ViewBuilder content: () -> some View) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            SettingsPaneHeader(title: title)
+            content()
         }
     }
 
@@ -135,5 +144,21 @@ struct SettingsView: View {
         let start = month.start(in: timeZone).formatted(style)
         let end = month.end(in: timeZone).formatted(style)
         return "\(start) – \(end)"
+    }
+}
+
+/// Shared page header for settings panes: names the current page (or the
+/// selected client) at the top of its column.
+struct SettingsPaneHeader: View {
+    let title: String
+
+    var body: some View {
+        Text(title)
+            .font(.title3.weight(.semibold))
+            .lineLimit(1)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 16)
+            .padding(.top, 14)
+            .padding(.bottom, 6)
     }
 }

@@ -1,15 +1,23 @@
 import SwiftUI
 
-/// The goal half of the editor: hours / revenue with currency-converter
-/// behavior against the rate living in the Client Profile section. The
-/// last-edited goal field is authoritative and highlighted; the other side
-/// always shows the derived value. Saving writes a per-month goal version
-/// (rate included) — "this month and onward" by default, retroactive only
-/// after an explicit confirmation.
+/// Fields a needs-setup item can jump-focus to.
+enum ClientField: Hashable {
+    case displayName
+    case rate
+    case hours
+    case revenue
+}
+
+/// The goal half of the editor: hours and revenue side by side like a
+/// currency converter — edit either field and the other follows, using the
+/// rate from the Client Profile section. Saving writes a per-month goal
+/// version (rate included); "this month and onward" by default, retroactive
+/// only after an explicit confirmation.
 struct GoalEditorSection: View {
     @Environment(AppState.self) private var appState
     let client: ClientConfig
     @Binding var draft: GoalDraft
+    var focus: FocusState<ClientField?>.Binding
 
     @State private var showScopeDialog = false
     @State private var savedFeedback = false
@@ -22,40 +30,51 @@ struct GoalEditorSection: View {
         client.goalHistory.keys.contains { $0 < month }
     }
 
+    private var isDirty: Bool {
+        draft != GoalDraft(goal: client.goal(for: month))
+    }
+
     var body: some View {
-        Section("Monthly Goal") {
-            LabeledContent {
-                TextField("Hours", value: hoursBinding, format: .number.precision(.fractionLength(0...2)))
-                    .multilineTextAlignment(.trailing)
-                    .labelsHidden()
-            } label: {
-                fieldLabel("Goal in hours", isAuthoritative: draft.authoritative == .hours)
-            }
-
-            LabeledContent {
-                TextField("Revenue", value: revenueBinding, format: .number.precision(.fractionLength(0...2)))
-                    .multilineTextAlignment(.trailing)
-                    .labelsHidden()
-            } label: {
-                fieldLabel("Revenue target (\(client.currency))", isAuthoritative: draft.authoritative == .revenue)
-            }
-
-            HStack {
-                // The effective-scope label is always visible, per spec.
-                Text("Changes take effect from \(Format.monthTitle(month, timeZone: appState.timeZone)) onward.")
-                    .font(.caption)
+        Section {
+            HStack(alignment: .bottom, spacing: 12) {
+                converterField(
+                    "Hours",
+                    value: hoursBinding,
+                    focusTag: .hours,
+                    width: 120
+                )
+                Image(systemName: "arrow.left.arrow.right")
                     .foregroundStyle(.secondary)
+                    .padding(.bottom, 5)
+                converterField(
+                    "Revenue (\(client.currency))",
+                    value: revenueBinding,
+                    focusTag: .revenue,
+                    width: 140
+                )
+                Spacer()
+            }
+            .padding(.vertical, 2)
+        } header: {
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Monthly Goal")
+                    Text("Hours and revenue stay in sync — edit either side. Changes apply from \(Format.monthTitle(month, timeZone: appState.timeZone)) onward.")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .textCase(nil)
+                }
                 Spacer()
                 if savedFeedback {
                     Label("Saved", systemImage: "checkmark")
-                        .font(.caption)
+                        .font(.callout)
                         .foregroundStyle(.green)
                         .transition(.opacity)
                 }
-                Button("Save Goal") {
+                Button("Save") {
                     save()
                 }
-                .disabled(draft.monthlyGoal == nil || draft == GoalDraft(goal: client.goal(for: month)))
+                .disabled(draft.monthlyGoal == nil || !isDirty)
             }
         }
         .confirmationDialog(
@@ -74,22 +93,21 @@ struct GoalEditorSection: View {
         }
     }
 
-    private func fieldLabel(_ title: String, isAuthoritative: Bool) -> some View {
-        HStack(spacing: 5) {
+    private func converterField(
+        _ title: String,
+        value: Binding<Decimal?>,
+        focusTag: ClientField,
+        width: CGFloat
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
             Text(title)
-                .fontWeight(isAuthoritative ? .semibold : .regular)
-            if isAuthoritative {
-                Text("SET")
-                    .font(.caption2.weight(.bold))
-                    .padding(.horizontal, 4)
-                    .padding(.vertical, 1)
-                    .background(RoundedRectangle(cornerRadius: 3).fill(.tint.opacity(0.15)))
-                    .foregroundStyle(.tint)
-            } else {
-                Text("derived")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            TextField("0", value: value, format: .number.precision(.fractionLength(0...2)))
+                .textFieldStyle(.roundedBorder)
+                .multilineTextAlignment(.trailing)
+                .frame(width: width)
+                .focused(focus, equals: focusTag)
         }
     }
 

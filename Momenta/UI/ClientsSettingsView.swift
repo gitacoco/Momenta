@@ -1,9 +1,9 @@
 import SwiftUI
+import Charts
 
 /// Settings → Clients: the full Toggl client list (no manual add) with enable
-/// switches and a detail pane for local configuration. Workspace grouping
-/// only appears when the account actually has multiple workspaces
-/// (Toggl Enterprise); on single-workspace plans it is meaningless noise.
+/// switches, drag-to-reorder, and a detail pane for local configuration.
+/// Workspace grouping only appears for multi-workspace (Enterprise) accounts.
 struct ClientsSettingsView: View {
     @Environment(AppState.self) private var appState
     @State private var selectedClientID: Int?
@@ -14,9 +14,10 @@ struct ClientsSettingsView: View {
                 emptyState
             } else {
                 HStack(spacing: 0) {
-                    clientList
+                    listPane
                         .frame(width: 230)
                     Divider()
+                        .ignoresSafeArea(.container, edges: .top)
                     detail
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                 }
@@ -87,23 +88,18 @@ struct ClientsSettingsView: View {
         return names
     }
 
-    private var clientList: some View {
-        VStack(spacing: 0) {
+    private var listPane: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            SettingsPaneHeader(title: "Clients")
             List(selection: $selectedClientID) {
                 if isMultiWorkspace {
                     ForEach(workspaceNames, id: \.self) { workspace in
                         Section(workspace) {
-                            ForEach(activeClients.filter { $0.workspaceName == workspace }) { client in
-                                clientRow(client)
-                                    .tag(client.id)
-                            }
+                            clientRows(activeClients.filter { $0.workspaceName == workspace })
                         }
                     }
                 } else {
-                    ForEach(activeClients) { client in
-                        clientRow(client)
-                            .tag(client.id)
-                    }
+                    clientRows(activeClients)
                 }
                 if !archivedClients.isEmpty {
                     Section("Archived") {
@@ -115,20 +111,39 @@ struct ClientsSettingsView: View {
                 }
             }
             .listStyle(.sidebar)
+            .scrollContentBackground(.hidden)
             Divider()
-            HStack {
-                refreshButton
-                    .controlSize(.small)
-                if let error = appState.clientListError {
-                    Text(error)
-                        .font(.caption2)
-                        .foregroundStyle(.red)
-                        .lineLimit(1)
-                }
-                Spacer()
-            }
-            .padding(6)
+            listFooter
         }
+        .background(.background.secondary)
+    }
+
+    /// Rows for one displayed group, draggable to reorder within the group.
+    private func clientRows(_ group: [ClientConfig]) -> some View {
+        ForEach(group) { client in
+            clientRow(client)
+                .tag(client.id)
+        }
+        .onMove { fromOffsets, toOffset in
+            appState.config.move(ids: group.map(\.id), fromOffsets: fromOffsets, toOffset: toOffset)
+        }
+    }
+
+    /// Footer shares the sidebar's base background — the divider alone
+    /// separates it. Errors wrap fully instead of truncating.
+    private var listFooter: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if let error = appState.clientListError {
+                Text(error)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            refreshButton
+                .controlSize(.small)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(10)
     }
 
     private var refreshButton: some View {
@@ -136,12 +151,16 @@ struct ClientsSettingsView: View {
             Task { await appState.refreshClientList() }
         } label: {
             if appState.clientListLoading {
-                ProgressView()
-                    .controlSize(.small)
+                HStack(spacing: 5) {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text("Refreshing…")
+                }
             } else {
                 Label("Refresh from Toggl", systemImage: "arrow.clockwise")
             }
         }
+        .buttonStyle(.borderless)
         .disabled(appState.clientListLoading || !appState.account.isConnected)
     }
 
@@ -189,8 +208,11 @@ struct ClientsSettingsView: View {
     @ViewBuilder
     private var detail: some View {
         if let id = selectedClientID, let client = appState.config.client(id: id) {
-            ClientDetailView(client: client, showsWorkspace: isMultiWorkspace)
-                .id(id) // reset editor state when switching clients
+            VStack(alignment: .leading, spacing: 0) {
+                SettingsPaneHeader(title: client.displayName)
+                ClientDetailView(client: client, showsWorkspace: isMultiWorkspace)
+            }
+            .id(id) // reset editor state when switching clients
         } else {
             ContentUnavailableView {
                 Label("Select a Client", systemImage: "person.crop.rectangle")
@@ -209,6 +231,7 @@ private struct ClientDetailView: View {
     let client: ClientConfig
     let showsWorkspace: Bool
     @State private var draft: GoalDraft
+    @FocusState private var focusedField: ClientField?
 
     init(client: ClientConfig, showsWorkspace: Bool) {
         self.client = client
@@ -226,21 +249,18 @@ private struct ClientDetailView: View {
         Form {
             if client.isEnabled, !client.isArchivedInToggl,
                client.state(for: appState.currentMonth) == .needsSetup {
-                Section {
-                    Label(
-                        "Needs setup — set an hourly rate and a monthly goal below. Tracked time starts counting once configured.",
-                        systemImage: "exclamationmark.circle.fill"
-                    )
-                    .foregroundStyle(.orange)
-                }
+                needsSetupSection
             }
 
             Section("Client Profile") {
-                TextField(
-                    "Display name",
-                    text: displayNameBinding,
-                    prompt: Text(client.togglName)
-                )
+                LabeledContent("Display name") {
+                    TextField("Display name", text: displayNameBinding, prompt: Text(client.togglName))
+                        .textFieldStyle(.roundedBorder)
+                        .frame(width: 220)
+                        .multilineTextAlignment(.trailing)
+                        .focused($focusedField, equals: .displayName)
+                        .labelsHidden()
+                }
                 ColorPicker("Color", selection: colorBinding, supportsOpacity: false)
                 if client.displayNameOverride != nil {
                     LabeledContent("Toggl name", value: client.togglName)
@@ -250,9 +270,11 @@ private struct ClientDetailView: View {
                 }
                 LabeledContent("Hourly rate") {
                     HStack(spacing: 6) {
-                        TextField("Rate", value: rateBinding, format: .number)
+                        TextField("0", value: rateBinding, format: .number)
+                            .textFieldStyle(.roundedBorder)
                             .multilineTextAlignment(.trailing)
                             .frame(width: 90)
+                            .focused($focusedField, equals: .rate)
                             .labelsHidden()
                         Picker("Currency", selection: currencyBinding) {
                             ForEach(currencyOptions, id: \.self) { code in
@@ -265,13 +287,7 @@ private struct ClientDetailView: View {
                 }
             }
 
-            Section("Pacing") {
-                Picker("Planned progress on", selection: pacingBinding) {
-                    Text("Weekdays only").tag(PacingMode.weekdays)
-                    Text("Every calendar day").tag(PacingMode.calendarDays)
-                }
-                .pickerStyle(.radioGroup)
-            }
+            pacingSection
 
             if client.isArchivedInToggl {
                 Section {
@@ -282,12 +298,114 @@ private struct ClientDetailView: View {
                     .foregroundStyle(.secondary)
                 }
             } else {
-                GoalEditorSection(client: client, draft: $draft)
+                GoalEditorSection(client: client, draft: $draft, focus: $focusedField)
             }
             GoalHistoryView(client: client)
         }
         .formStyle(.grouped)
         .disabled(client.isArchivedInToggl)
+    }
+
+    // MARK: Needs setup (itemized, click-to-focus)
+
+    private var missingRate: Bool {
+        (draft.hourlyRate ?? 0) <= 0
+    }
+
+    private var missingGoal: Bool {
+        (draft.hours ?? 0) <= 0 && (draft.revenue ?? 0) <= 0
+    }
+
+    private var needsSetupSection: some View {
+        Section {
+            VStack(alignment: .leading, spacing: 8) {
+                Label("Finish setup to start tracking", systemImage: "exclamationmark.circle.fill")
+                    .font(.callout.weight(.semibold))
+                    .foregroundStyle(.orange)
+                if missingRate {
+                    setupItem("Set an hourly rate", target: .rate)
+                }
+                if missingGoal {
+                    setupItem("Enter a monthly goal in hours or revenue", target: .hours)
+                }
+                if !missingRate && !missingGoal {
+                    setupItem("Press Save in Monthly Goal to apply", target: .hours)
+                }
+            }
+            .padding(.vertical, 2)
+        }
+    }
+
+    /// Each unmet requirement is a link that focuses the matching field.
+    private func setupItem(_ text: String, target: ClientField) -> some View {
+        Button {
+            focusedField = target
+        } label: {
+            HStack(spacing: 5) {
+                Image(systemName: "arrow.forward.circle")
+                Text(text)
+                    .underline()
+            }
+            .font(.callout)
+            .foregroundStyle(.orange)
+        }
+        .buttonStyle(.plain)
+    }
+
+    // MARK: Pacing (with preview)
+
+    private var pacingSection: some View {
+        Section("Pacing") {
+            Picker("Planned progress on", selection: pacingBinding) {
+                Text("Weekdays only").tag(PacingMode.weekdays)
+                Text("Every calendar day").tag(PacingMode.calendarDays)
+            }
+            .pickerStyle(.segmented)
+
+            VStack(alignment: .leading, spacing: 4) {
+                pacingPreview
+                    .frame(height: 56)
+                Text(pacingCaption)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.vertical, 2)
+        }
+    }
+
+    /// The month's planned goal line under the selected pacing, so the choice
+    /// has a visible consequence before any real data exists.
+    private var pacingPreview: some View {
+        let month = appState.currentMonth
+        let timeZone = appState.timeZone
+        let pacing = appState.config.client(id: client.id)?.pacing ?? .weekdays
+        let weights = ProgressCalculator.dailyWeights(month: month, pacing: pacing, timeZone: timeZone)
+        let total = max(1, weights.reduce(0, +))
+        var cumulative = 0
+        let points: [(day: Int, fraction: Double)] = weights.enumerated().map { index, weight in
+            cumulative += weight
+            return (index + 1, Double(cumulative) / Double(total))
+        }
+        return Chart(points, id: \.day) { point in
+            LineMark(
+                x: .value("Day", point.day),
+                y: .value("Planned", point.fraction)
+            )
+            .lineStyle(StrokeStyle(lineWidth: 1.5, dash: [4, 3]))
+            .foregroundStyle(.secondary)
+        }
+        .chartXAxis(.hidden)
+        .chartYAxis(.hidden)
+    }
+
+    private var pacingCaption: String {
+        let pacing = appState.config.client(id: client.id)?.pacing ?? .weekdays
+        switch pacing {
+        case .weekdays:
+            return "The goal line stays flat on weekends — days off create no artificial debt."
+        case .calendarDays:
+            return "Every day carries the same share of the goal, weekends included."
+        }
     }
 
     private var currencyOptions: [String] {

@@ -20,5 +20,7 @@ struct MomentaApp: App {
             SettingsView()
                 .environment(appState)
         }
+        // Freely resizable above the content's minimum size.
+        .windowResizability(.contentMinSize)
     }
 }

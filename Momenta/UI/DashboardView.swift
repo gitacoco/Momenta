@@ -233,7 +233,7 @@ struct DashboardView: View {
             Text(staleSuffix(apiError.errorDescription ?? "Refresh failed"))
                 .font(.caption)
                 .foregroundStyle(.secondary)
-                .lineLimit(1)
+                .fixedSize(horizontal: false, vertical: true)
             if apiError == .unauthorized {
                 Button("Reconnect") {
                     appState.pendingSettingsDestination = .account
@@ -248,7 +248,7 @@ struct DashboardView: View {
             Text(staleSuffix(error))
                 .font(.caption)
                 .foregroundStyle(.secondary)
-                .lineLimit(1)
+                .fixedSize(horizontal: false, vertical: true)
         } else if appState.isShowingStaleData {
             Image(systemName: "clock.arrow.circlepath")
                 .foregroundStyle(.orange)
