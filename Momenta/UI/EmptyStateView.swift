@@ -5,6 +5,7 @@ import SwiftUI
 /// inside the Settings window; remaining settings rely on defaults.
 struct EmptyStateView: View {
     @Environment(AppState.self) private var appState
+    @Environment(\.openSettings) private var openSettings
 
     private var tokenDone: Bool {
         appState.account.isConnected
@@ -30,8 +31,10 @@ struct EmptyStateView: View {
                 step(2, "Enable the clients you want to track", done: clientsDone)
                 step(3, "Set an hourly rate and monthly goal for each", done: goalsDone)
             }
-            SettingsLink {
-                Text(tokenDone ? "Continue in Settings" : "Open Settings")
+            Button(tokenDone ? "Continue in Settings" : "Open Settings") {
+                // Land on the step the user is actually on.
+                appState.pendingSettingsDestination = tokenDone ? .clients(clientID: nil) : .account
+                openSettings()
             }
             .keyboardShortcut(",", modifiers: .command)
         }

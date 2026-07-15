@@ -3,6 +3,7 @@ import SwiftUI
 /// Popover content: month navigation, unit toggle, client cards, warnings.
 struct DashboardView: View {
     @Environment(AppState.self) private var appState
+    @Environment(\.openSettings) private var openSettings
 
     var body: some View {
         VStack(spacing: 0) {
@@ -170,10 +171,12 @@ struct DashboardView: View {
                 .font(.callout)
                 .foregroundStyle(.secondary)
             Spacer()
-            SettingsLink {
-                Text("Set up")
-                    .font(.callout)
+            Button("Set up") {
+                // Deep-link straight to this client's configuration.
+                appState.pendingSettingsDestination = .clients(clientID: client.id)
+                openSettings()
             }
+            .font(.callout)
         }
         .padding(12)
         .background(RoundedRectangle(cornerRadius: 10).fill(Color(nsColor: .controlBackgroundColor)))
@@ -228,10 +231,11 @@ struct DashboardView: View {
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
             if apiError == .unauthorized {
-                SettingsLink {
-                    Text("Reconnect")
-                        .font(.caption)
+                Button("Reconnect") {
+                    appState.pendingSettingsDestination = .account
+                    openSettings()
                 }
+                .font(.caption)
             }
         } else if let error = appState.lastError {
             Image(systemName: "exclamationmark.triangle")

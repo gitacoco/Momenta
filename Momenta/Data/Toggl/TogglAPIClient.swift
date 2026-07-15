@@ -137,12 +137,16 @@ struct TogglAPIClient: Sendable {
             return data
         case 401, 403:
             throw TogglAPIError.unauthorized
+        case 402:
+            // Toggl answers 402 on endpoints/parameters outside the
+            // workspace's plan. Include the path so the culprit is obvious.
+            throw TogglAPIError.other("Toggl declined \(path) (HTTP 402 — may need a paid plan).")
         case 429:
             throw TogglAPIError.rateLimited
         case 500...599:
             throw TogglAPIError.server(status: response.statusCode)
         default:
-            throw TogglAPIError.other("Unexpected HTTP \(response.statusCode)")
+            throw TogglAPIError.other("Unexpected HTTP \(response.statusCode) from \(path)")
         }
     }
 

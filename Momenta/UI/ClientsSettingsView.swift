@@ -26,6 +26,19 @@ struct ClientsSettingsView: View {
             // Fetch once when the page opens; the footer button re-fetches.
             await appState.refreshClientList()
         }
+        .onAppear(perform: consumeDeepLink)
+        .onChange(of: appState.pendingSettingsDestination) {
+            consumeDeepLink()
+        }
+    }
+
+    /// Selects the client a popover deep link asked for.
+    private func consumeDeepLink() {
+        guard case .clients(let clientID) = appState.pendingSettingsDestination else { return }
+        if let clientID {
+            selectedClientID = clientID
+        }
+        appState.pendingSettingsDestination = nil
     }
 
     // MARK: Empty / disconnected

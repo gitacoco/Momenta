@@ -1,6 +1,12 @@
 import Foundation
 import Observation
 
+/// Deep-link target inside the Settings window.
+enum SettingsDestination: Equatable, Sendable {
+    case account
+    case clients(clientID: Int?)
+}
+
 @MainActor
 @Observable
 final class AppState {
@@ -39,6 +45,9 @@ final class AppState {
     var clientListError: String?
     /// Popover chart unit toggle. View state only, resets with the process.
     var displayUnit: DisplayUnit = .revenue
+    /// Set right before opening the Settings window to land on a specific
+    /// page (and client). Consumed by SettingsView / ClientsSettingsView.
+    var pendingSettingsDestination: SettingsDestination?
 
     private var lastAutoRefreshAt: Date?
 

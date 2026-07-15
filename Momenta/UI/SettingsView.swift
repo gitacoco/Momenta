@@ -56,6 +56,24 @@ struct SettingsView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .frame(minWidth: 680, minHeight: 440)
+        .onAppear(perform: consumeDestination)
+        .onChange(of: appState.pendingSettingsDestination) {
+            consumeDestination()
+        }
+    }
+
+    /// Routes deep links from the popover. The clients destination is left
+    /// pending so ClientsSettingsView can also pick up the client selection.
+    private func consumeDestination() {
+        switch appState.pendingSettingsDestination {
+        case .account:
+            selection = .account
+            appState.pendingSettingsDestination = nil
+        case .clients:
+            selection = .clients
+        case nil:
+            break
+        }
     }
 
     private var displaySettings: some View {
