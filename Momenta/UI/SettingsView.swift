@@ -113,6 +113,7 @@ struct SettingsView: View {
         .scrollDisabled(true)
         .frame(minWidth: 180, idealWidth: 180, maxWidth: 180)
         .navigationSplitViewColumnWidth(min: 180, ideal: 180, max: 180)
+        .background(LockedNavigationSplitColumn(width: 180))
         // Settings sidebars never collapse or expose a sidebar toggle.
         .toolbar(removing: .sidebarToggle)
     }
