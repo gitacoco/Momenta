@@ -229,21 +229,21 @@ struct SettingsView: View {
             }
 
             SwiftUI.Section("Menu bar") {
-                Picker("Display objects", selection: $appState.displaySettings.menuBarObjectMode) {
+                Picker("Progress", selection: $appState.displaySettings.menuBarObjectMode) {
                     ForEach(MenuBarObjectMode.allCases) { mode in
                         Text(mode.label).tag(mode)
                     }
                 }
                 .pickerStyle(.segmented)
 
-                Picker("Time period", selection: $appState.displaySettings.aggregationPeriod) {
+                Picker("Period", selection: $appState.displaySettings.aggregationPeriod) {
                     ForEach(AggregationPeriod.allCases) { period in
                         Text(period.label).tag(period)
                     }
                 }
                 .pickerStyle(.segmented)
 
-                Picker("Visualization", selection: $appState.displaySettings.menuBarVisualization) {
+                Picker("Indicator style", selection: $appState.displaySettings.menuBarVisualization) {
                     ForEach(MenuBarVisualization.allCases) { visualization in
                         Text(visualization.label).tag(visualization)
                     }

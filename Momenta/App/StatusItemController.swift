@@ -75,6 +75,11 @@ final class StatusItemController: NSObject {
         menu.addItem(settings)
 
         menu.addItem(.separator())
+        menu.addItem(progressMenuItem())
+        menu.addItem(periodMenuItem())
+        menu.addItem(indicatorStyleMenuItem())
+
+        menu.addItem(.separator())
 
         let lastSync = NSMenuItem(title: lastSyncTitle, action: nil, keyEquivalent: "")
         lastSync.isEnabled = false
@@ -94,6 +99,66 @@ final class StatusItemController: NSObject {
         statusItem.menu = nil
     }
 
+    private func progressMenuItem() -> NSMenuItem {
+        let parent = NSMenuItem(title: "Progress", action: nil, keyEquivalent: "")
+        let submenu = NSMenu(title: "Progress")
+
+        for mode in MenuBarObjectMode.allCases {
+            let item = NSMenuItem(
+                title: mode.label,
+                action: #selector(selectProgressMode(_:)),
+                keyEquivalent: ""
+            )
+            item.target = self
+            item.representedObject = mode.rawValue
+            item.state = appState.displaySettings.menuBarObjectMode == mode ? .on : .off
+            submenu.addItem(item)
+        }
+
+        parent.submenu = submenu
+        return parent
+    }
+
+    private func periodMenuItem() -> NSMenuItem {
+        let parent = NSMenuItem(title: "Period", action: nil, keyEquivalent: "")
+        let submenu = NSMenu(title: "Period")
+
+        for period in AggregationPeriod.allCases {
+            let item = NSMenuItem(
+                title: period.label,
+                action: #selector(selectPeriod(_:)),
+                keyEquivalent: ""
+            )
+            item.target = self
+            item.representedObject = period.rawValue
+            item.state = appState.displaySettings.aggregationPeriod == period ? .on : .off
+            submenu.addItem(item)
+        }
+
+        parent.submenu = submenu
+        return parent
+    }
+
+    private func indicatorStyleMenuItem() -> NSMenuItem {
+        let parent = NSMenuItem(title: "Indicator Style", action: nil, keyEquivalent: "")
+        let submenu = NSMenu(title: "Indicator Style")
+
+        for visualization in MenuBarVisualization.allCases {
+            let item = NSMenuItem(
+                title: visualization.label,
+                action: #selector(selectIndicatorStyle(_:)),
+                keyEquivalent: ""
+            )
+            item.target = self
+            item.representedObject = visualization.rawValue
+            item.state = appState.displaySettings.menuBarVisualization == visualization ? .on : .off
+            submenu.addItem(item)
+        }
+
+        parent.submenu = submenu
+        return parent
+    }
+
     private var lastSyncTitle: String {
         if let at = appState.account.lastSyncAt {
             return "Last query at \(at.formatted(date: .omitted, time: .shortened))"
@@ -103,6 +168,24 @@ final class StatusItemController: NSObject {
 
     @objc private func openSettingsAction() {
         openSettingsWindow()
+    }
+
+    @objc private func selectProgressMode(_ sender: NSMenuItem) {
+        guard let rawValue = sender.representedObject as? String,
+              let mode = MenuBarObjectMode(rawValue: rawValue) else { return }
+        appState.displaySettings.menuBarObjectMode = mode
+    }
+
+    @objc private func selectPeriod(_ sender: NSMenuItem) {
+        guard let rawValue = sender.representedObject as? String,
+              let period = AggregationPeriod(rawValue: rawValue) else { return }
+        appState.displaySettings.aggregationPeriod = period
+    }
+
+    @objc private func selectIndicatorStyle(_ sender: NSMenuItem) {
+        guard let rawValue = sender.representedObject as? String,
+              let visualization = MenuBarVisualization(rawValue: rawValue) else { return }
+        appState.displaySettings.menuBarVisualization = visualization
     }
 
     @objc private func refreshAction() {

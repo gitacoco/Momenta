@@ -41,9 +41,9 @@ enum MenuBarObjectMode: String, Codable, CaseIterable, Identifiable, Sendable {
 
     var label: String {
         switch self {
-        case .aggregation: return "Aggregation"
-        case .split: return "Split"
-        case .both: return "Both"
+        case .aggregation: return "Overall"
+        case .split: return "By Client"
+        case .both: return "Overall + Clients"
         }
     }
 }
