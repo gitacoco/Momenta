@@ -1,8 +1,8 @@
 import SwiftUI
 
-/// Single Settings window (Cmd+,) with the Account / Clients / Display
-/// primary sidebar. Account and Clients arrive with BON-12/13; Display is
-/// already live so the menu bar modes can be exercised against mock data.
+/// Single Settings window (Cmd+,) with an always-visible Account / Clients /
+/// Display sidebar. Plain fixed layout — settings never collapse the sidebar,
+/// so no NavigationSplitView toolbar or toggle button.
 struct SettingsView: View {
     private enum Section: String, CaseIterable, Identifiable {
         case account
@@ -32,23 +32,30 @@ struct SettingsView: View {
     @State private var selection: Section = .account
 
     var body: some View {
-        NavigationSplitView {
+        HStack(spacing: 0) {
             List(Section.allCases, selection: $selection) { section in
                 Label(section.label, systemImage: section.icon)
                     .tag(section)
             }
-            .navigationSplitViewColumnWidth(min: 150, ideal: 170)
-        } detail: {
-            switch selection {
-            case .account:
-                AccountSettingsView()
-            case .clients:
-                ClientsSettingsView()
-            case .display:
-                displaySettings
+            .listStyle(.sidebar)
+            .scrollDisabled(true)
+            .frame(width: 170)
+
+            Divider()
+
+            Group {
+                switch selection {
+                case .account:
+                    AccountSettingsView()
+                case .clients:
+                    ClientsSettingsView()
+                case .display:
+                    displaySettings
+                }
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .frame(minWidth: 560, minHeight: 380)
+        .frame(minWidth: 680, minHeight: 440)
     }
 
     private var displaySettings: some View {
@@ -82,7 +89,7 @@ struct SettingsView: View {
 
             LabeledContent("Current month boundaries") {
                 Text(monthBoundaryExample)
-                    .font(.caption.monospacedDigit())
+                    .monospacedDigit()
                     .foregroundStyle(.secondary)
             }
         }

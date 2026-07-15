@@ -1,7 +1,9 @@
 import SwiftUI
 
-/// Settings → Clients: the full Toggl client list (no manual add), grouped by
-/// workspace, with enable switches and a detail pane for local configuration.
+/// Settings → Clients: the full Toggl client list (no manual add) with enable
+/// switches and a detail pane for local configuration. Workspace grouping
+/// only appears when the account actually has multiple workspaces
+/// (Toggl Enterprise); on single-workspace plans it is meaningless noise.
 struct ClientsSettingsView: View {
     @Environment(AppState.self) private var appState
     @State private var selectedClientID: Int?
@@ -21,7 +23,7 @@ struct ClientsSettingsView: View {
             }
         }
         .task {
-            // Fetch once when the page opens; the toolbar button re-fetches.
+            // Fetch once when the page opens; the footer button re-fetches.
             await appState.refreshClientList()
         }
     }
@@ -60,6 +62,10 @@ struct ClientsSettingsView: View {
         appState.config.clients.filter { $0.isArchivedInToggl }
     }
 
+    private var isMultiWorkspace: Bool {
+        Set(appState.config.clients.map(\.workspaceID)).count > 1
+    }
+
     private var workspaceNames: [String] {
         var names: [String] = []
         for client in activeClients where !names.contains(client.workspaceName) {
@@ -71,12 +77,19 @@ struct ClientsSettingsView: View {
     private var clientList: some View {
         VStack(spacing: 0) {
             List(selection: $selectedClientID) {
-                ForEach(workspaceNames, id: \.self) { workspace in
-                    Section(workspace) {
-                        ForEach(activeClients.filter { $0.workspaceName == workspace }) { client in
-                            clientRow(client)
-                                .tag(client.id)
+                if isMultiWorkspace {
+                    ForEach(workspaceNames, id: \.self) { workspace in
+                        Section(workspace) {
+                            ForEach(activeClients.filter { $0.workspaceName == workspace }) { client in
+                                clientRow(client)
+                                    .tag(client.id)
+                            }
                         }
+                    }
+                } else {
+                    ForEach(activeClients) { client in
+                        clientRow(client)
+                            .tag(client.id)
                     }
                 }
                 if !archivedClients.isEmpty {
@@ -120,19 +133,11 @@ struct ClientsSettingsView: View {
     }
 
     private func clientRow(_ client: ClientConfig) -> some View {
-        let month = appState.currentMonth
-        return HStack(spacing: 6) {
+        HStack(spacing: 6) {
             Circle()
                 .fill(Color(hex: client.colorHex))
                 .frame(width: 8, height: 8)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(client.displayName)
-                if client.state(for: month) == .needsSetup {
-                    Text("Needs setup")
-                        .font(.caption2)
-                        .foregroundStyle(.orange)
-                }
-            }
+            Text(client.displayName)
             Spacer()
             Toggle("", isOn: enabledBinding(client))
                 .toggleStyle(.switch)
@@ -171,35 +176,82 @@ struct ClientsSettingsView: View {
     @ViewBuilder
     private var detail: some View {
         if let id = selectedClientID, let client = appState.config.client(id: id) {
-            ClientDetailView(client: client)
+            ClientDetailView(client: client, showsWorkspace: isMultiWorkspace)
                 .id(id) // reset editor state when switching clients
         } else {
             ContentUnavailableView {
                 Label("Select a Client", systemImage: "person.crop.rectangle")
             } description: {
-                Text("Pick a client to configure its rate, goal, and appearance.")
+                Text("Pick a client to configure its profile, rate, and goal.")
             }
         }
     }
 }
 
-/// Right-hand configuration pane for one client.
+/// Right-hand configuration pane for one client. Owns the shared goal draft:
+/// the rate lives in the profile section, hours/revenue in the goal section,
+/// and one save action versions them together.
 private struct ClientDetailView: View {
     @Environment(AppState.self) private var appState
     let client: ClientConfig
+    let showsWorkspace: Bool
+    @State private var draft: GoalDraft
+
+    init(client: ClientConfig, showsWorkspace: Bool) {
+        self.client = client
+        self.showsWorkspace = showsWorkspace
+        let month = YearMonth(containing: Date(), timeZone: .current)
+        _draft = State(initialValue: GoalDraft(goal: client.goal(for: month)))
+    }
+
+    private static let currencyCodes = [
+        "USD", "EUR", "GBP", "CNY", "JPY", "HKD", "SGD", "CAD",
+        "AUD", "CHF", "SEK", "NOK", "DKK", "NZD", "KRW", "TWD", "INR",
+    ]
 
     var body: some View {
         Form {
-            Section("Appearance") {
+            if client.isEnabled, !client.isArchivedInToggl,
+               client.state(for: appState.currentMonth) == .needsSetup {
+                Section {
+                    Label(
+                        "Needs setup — set an hourly rate and a monthly goal below. Tracked time starts counting once configured.",
+                        systemImage: "exclamationmark.circle.fill"
+                    )
+                    .foregroundStyle(.orange)
+                }
+            }
+
+            Section("Client Profile") {
                 TextField(
                     "Display name",
                     text: displayNameBinding,
                     prompt: Text(client.togglName)
                 )
                 ColorPicker("Color", selection: colorBinding, supportsOpacity: false)
-                LabeledContent("Toggl name", value: client.togglName)
-                LabeledContent("Workspace", value: client.workspaceName)
+                if client.displayNameOverride != nil {
+                    LabeledContent("Toggl name", value: client.togglName)
+                }
+                if showsWorkspace {
+                    LabeledContent("Workspace", value: client.workspaceName)
+                }
+                LabeledContent("Hourly rate") {
+                    HStack(spacing: 6) {
+                        TextField("Rate", value: rateBinding, format: .number)
+                            .multilineTextAlignment(.trailing)
+                            .frame(width: 90)
+                            .labelsHidden()
+                        Picker("Currency", selection: currencyBinding) {
+                            ForEach(currencyOptions, id: \.self) { code in
+                                Text(code).tag(code)
+                            }
+                        }
+                        .labelsHidden()
+                        .fixedSize()
+                    }
+                }
             }
+
             Section("Pacing") {
                 Picker("Planned progress on", selection: pacingBinding) {
                     Text("Weekdays only").tag(PacingMode.weekdays)
@@ -207,6 +259,7 @@ private struct ClientDetailView: View {
                 }
                 .pickerStyle(.radioGroup)
             }
+
             if client.isArchivedInToggl {
                 Section {
                     Label(
@@ -216,13 +269,23 @@ private struct ClientDetailView: View {
                     .foregroundStyle(.secondary)
                 }
             } else {
-                GoalEditorView(client: client)
+                GoalEditorSection(client: client, draft: $draft)
             }
             GoalHistoryView(client: client)
         }
         .formStyle(.grouped)
         .disabled(client.isArchivedInToggl)
     }
+
+    private var currencyOptions: [String] {
+        var codes = Self.currencyCodes
+        if !codes.contains(client.currency) {
+            codes.insert(client.currency, at: 0)
+        }
+        return codes
+    }
+
+    // MARK: Bindings
 
     private var displayNameBinding: Binding<String> {
         Binding {
@@ -245,6 +308,18 @@ private struct ClientDetailView: View {
         }
     }
 
+    /// Currency is a display preference, saved immediately (not versioned
+    /// with the goal).
+    private var currencyBinding: Binding<String> {
+        Binding {
+            appState.config.client(id: client.id)?.currency ?? "USD"
+        } set: { newValue in
+            guard var updated = appState.config.client(id: client.id) else { return }
+            updated.currencyCode = newValue
+            appState.config.update(updated)
+        }
+    }
+
     private var pacingBinding: Binding<PacingMode> {
         Binding {
             appState.config.client(id: client.id)?.pacing ?? .weekdays
@@ -253,6 +328,10 @@ private struct ClientDetailView: View {
             updated.pacing = newValue
             appState.config.update(updated)
         }
+    }
+
+    private var rateBinding: Binding<Decimal?> {
+        Binding { draft.hourlyRate } set: { draft.setRate($0) }
     }
 }
 

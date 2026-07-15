@@ -33,6 +33,14 @@ struct ClientConfig: Identifiable, Hashable, Codable, Sendable {
     /// Per-month goal versions. A month without an entry inherits the most
     /// recent earlier version ("this month and onward" semantics).
     var goalHistory: [YearMonth: MonthlyGoal]
+    /// ISO 4217 code used to render this client's money values. Display-only:
+    /// cross-client aggregation still sums raw numbers. Optional so configs
+    /// persisted before this field decode cleanly.
+    var currencyCode: String? = nil
+
+    var currency: String {
+        currencyCode ?? "USD"
+    }
 
     var displayName: String {
         displayNameOverride ?? togglName

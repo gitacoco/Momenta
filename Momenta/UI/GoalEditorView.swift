@@ -1,23 +1,18 @@
 import SwiftUI
 
-/// The core goal editor: rate / hours / revenue with currency-converter
-/// behavior. The last-edited goal field is authoritative and highlighted; the
-/// other side always shows the derived value. Saving writes a per-month goal
-/// version — "this month and onward" by default, retroactive only after an
-/// explicit confirmation.
-struct GoalEditorView: View {
+/// The goal half of the editor: hours / revenue with currency-converter
+/// behavior against the rate living in the Client Profile section. The
+/// last-edited goal field is authoritative and highlighted; the other side
+/// always shows the derived value. Saving writes a per-month goal version
+/// (rate included) — "this month and onward" by default, retroactive only
+/// after an explicit confirmation.
+struct GoalEditorSection: View {
     @Environment(AppState.self) private var appState
     let client: ClientConfig
+    @Binding var draft: GoalDraft
 
-    @State private var draft: GoalDraft
     @State private var showScopeDialog = false
     @State private var savedFeedback = false
-
-    init(client: ClientConfig) {
-        self.client = client
-        let month = YearMonth(containing: Date(), timeZone: .current)
-        _draft = State(initialValue: GoalDraft(goal: client.goal(for: month)))
-    }
 
     private var month: YearMonth {
         appState.currentMonth
@@ -29,9 +24,6 @@ struct GoalEditorView: View {
 
     var body: some View {
         Section("Monthly Goal") {
-            TextField("Hourly rate", value: rateBinding, format: .number)
-                .multilineTextAlignment(.trailing)
-
             LabeledContent {
                 TextField("Hours", value: hoursBinding, format: .number.precision(.fractionLength(0...2)))
                     .multilineTextAlignment(.trailing)
@@ -45,7 +37,7 @@ struct GoalEditorView: View {
                     .multilineTextAlignment(.trailing)
                     .labelsHidden()
             } label: {
-                fieldLabel("Revenue target", isAuthoritative: draft.authoritative == .revenue)
+                fieldLabel("Revenue target (\(client.currency))", isAuthoritative: draft.authoritative == .revenue)
             }
 
             HStack {
@@ -102,10 +94,6 @@ struct GoalEditorView: View {
     }
 
     // MARK: Bindings
-
-    private var rateBinding: Binding<Decimal?> {
-        Binding { draft.hourlyRate } set: { draft.setRate($0) }
-    }
 
     private var hoursBinding: Binding<Decimal?> {
         Binding { draft.hours } set: { draft.setHours($0) }
@@ -170,6 +158,7 @@ struct GoalHistoryView: View {
 
     private func historyLine(_ goal: MonthlyGoal) -> String {
         let authored = goal.isAuthoredInHours ? "hours-led" : "revenue-led"
-        return "\(Format.hours(goal.hours)) · \(Format.currency(goal.revenue)) @ \(Format.currency(goal.hourlyRate))/h · \(authored)"
+        let code = client.currency
+        return "\(Format.hours(goal.hours)) · \(Format.currency(goal.revenue, code: code)) @ \(Format.currency(goal.hourlyRate, code: code))/h · \(authored)"
     }
 }

@@ -104,9 +104,13 @@ struct ClientCardView: View {
             .foregroundStyle(progress.isAhead ? .green : .red)
     }
 
+    private var currencyCode: String {
+        progress.client.currency
+    }
+
     private var deltaText: String {
         switch unit {
-        case .revenue: return Format.signedCurrency(progress.deltaRevenue)
+        case .revenue: return Format.signedCurrency(progress.deltaRevenue, code: currencyCode)
         case .hours: return Format.signedHours(progress.deltaHours)
         }
     }
@@ -133,14 +137,14 @@ struct ClientCardView: View {
 
     private var actualText: String {
         switch unit {
-        case .revenue: return Format.currency(progress.actualRevenue)
+        case .revenue: return Format.currency(progress.actualRevenue, code: currencyCode)
         case .hours: return Format.hours(progress.actualHours)
         }
     }
 
     private var goalText: String {
         switch unit {
-        case .revenue: return Format.currency(progress.goal.revenue)
+        case .revenue: return Format.currency(progress.goal.revenue, code: currencyCode)
         case .hours: return Format.hours(progress.goal.hours)
         }
     }
@@ -148,7 +152,7 @@ struct ClientCardView: View {
     private var secondaryText: String {
         switch unit {
         case .revenue: return "\(Format.hours(progress.actualHours)) logged"
-        case .hours: return "\(Format.currency(progress.actualRevenue)) earned"
+        case .hours: return "\(Format.currency(progress.actualRevenue, code: currencyCode)) earned"
         }
     }
 }
