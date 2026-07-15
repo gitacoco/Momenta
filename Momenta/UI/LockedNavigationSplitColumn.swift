@@ -17,7 +17,6 @@ struct LockedNavigationSplitColumn: NSViewRepresentable {
 
     final class ProbeView: NSView {
         var width: CGFloat
-        private var delegateProxy: LockedSplitViewDelegate?
 
         init(width: CGFloat) {
             self.width = width
@@ -52,9 +51,11 @@ struct LockedNavigationSplitColumn: NSViewRepresentable {
 
         private func configureSplitViewItem() {
             guard let (splitView, paneIndex) = containingSplitViewPane(),
-                  let controller = splitView.delegate as? NSSplitViewController,
+                  let controller = containingSplitViewController(for: splitView),
                   controller.splitViewItems.indices.contains(paneIndex) else { return }
 
+            // A split view owned by NSSplitViewController rejects delegate
+            // replacement. Lock its supported item constraints instead.
             let item = controller.splitViewItems[paneIndex]
             item.canCollapse = false
             item.canCollapseFromWindowResize = false
@@ -65,30 +66,6 @@ struct LockedNavigationSplitColumn: NSViewRepresentable {
 
             if item.isCollapsed {
                 item.isCollapsed = false
-            }
-
-            let dividerIndex = paneIndex
-            let dividerPosition = splitView.subviews[paneIndex].frame.maxX
-            guard dividerPosition > 0 else {
-                scheduleConfiguration()
-                return
-            }
-
-            if let delegateProxy {
-                delegateProxy.lockedDividerIndex = dividerIndex
-                if splitView.delegate !== delegateProxy {
-                    delegateProxy.downstream = splitView.delegate
-                    splitView.delegate = delegateProxy
-                }
-            } else {
-                let proxy = LockedSplitViewDelegate(
-                    downstream: splitView.delegate,
-                    lockedDividerIndex: dividerIndex,
-                    lockedPosition: dividerPosition,
-                    lockedSubview: splitView.subviews[paneIndex]
-                )
-                delegateProxy = proxy
-                splitView.delegate = proxy
             }
         }
 
@@ -105,92 +82,20 @@ struct LockedNavigationSplitColumn: NSViewRepresentable {
 
             return nil
         }
-    }
 
-    /// Preserves SwiftUI's private split-view delegate behavior while
-    /// overriding only the decisions that could move or collapse this pane.
-    final class LockedSplitViewDelegate: NSObject, NSSplitViewDelegate {
-        weak var downstream: (any NSSplitViewDelegate)?
-        weak var lockedSubview: NSView?
-        var lockedDividerIndex: Int
-        let lockedPosition: CGFloat
-
-        init(
-            downstream: (any NSSplitViewDelegate)?,
-            lockedDividerIndex: Int,
-            lockedPosition: CGFloat,
-            lockedSubview: NSView
-        ) {
-            self.downstream = downstream
-            self.lockedDividerIndex = lockedDividerIndex
-            self.lockedPosition = lockedPosition
-            self.lockedSubview = lockedSubview
-        }
-
-        func splitView(
-            _ splitView: NSSplitView,
-            constrainMinCoordinate proposedMinimumPosition: CGFloat,
-            ofSubviewAt dividerIndex: Int
-        ) -> CGFloat {
-            guard dividerIndex == lockedDividerIndex else {
-                return downstream?.splitView?(
-                    splitView,
-                    constrainMinCoordinate: proposedMinimumPosition,
-                    ofSubviewAt: dividerIndex
-                ) ?? proposedMinimumPosition
+        private func containingSplitViewController(for splitView: NSSplitView) -> NSSplitViewController? {
+            if let controller = splitView.delegate as? NSSplitViewController {
+                return controller
             }
-            return lockedPosition
-        }
 
-        func splitView(
-            _ splitView: NSSplitView,
-            constrainMaxCoordinate proposedMaximumPosition: CGFloat,
-            ofSubviewAt dividerIndex: Int
-        ) -> CGFloat {
-            guard dividerIndex == lockedDividerIndex else {
-                return downstream?.splitView?(
-                    splitView,
-                    constrainMaxCoordinate: proposedMaximumPosition,
-                    ofSubviewAt: dividerIndex
-                ) ?? proposedMaximumPosition
+            var responder: NSResponder? = splitView
+            while let current = responder {
+                if let controller = current as? NSSplitViewController {
+                    return controller
+                }
+                responder = current.nextResponder
             }
-            return lockedPosition
-        }
-
-        func splitView(
-            _ splitView: NSSplitView,
-            constrainSplitPosition proposedPosition: CGFloat,
-            ofSubviewAt dividerIndex: Int
-        ) -> CGFloat {
-            guard dividerIndex == lockedDividerIndex else {
-                return downstream?.splitView?(
-                    splitView,
-                    constrainSplitPosition: proposedPosition,
-                    ofSubviewAt: dividerIndex
-                ) ?? proposedPosition
-            }
-            return lockedPosition
-        }
-
-        func splitView(_ splitView: NSSplitView, canCollapseSubview subview: NSView) -> Bool {
-            guard subview !== lockedSubview else { return false }
-            return downstream?.splitView?(splitView, canCollapseSubview: subview) ?? false
-        }
-
-        func splitView(_ splitView: NSSplitView, shouldAdjustSizeOfSubview view: NSView) -> Bool {
-            guard view !== lockedSubview else { return false }
-            return downstream?.splitView?(splitView, shouldAdjustSizeOfSubview: view) ?? true
-        }
-
-        override func responds(to selector: Selector!) -> Bool {
-            super.responds(to: selector) || downstream?.responds(to: selector) == true
-        }
-
-        override func forwardingTarget(for selector: Selector!) -> Any? {
-            if downstream?.responds(to: selector) == true {
-                return downstream
-            }
-            return super.forwardingTarget(for: selector)
+            return nil
         }
     }
 }
