@@ -28,4 +28,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             statusItemController = StatusItemController(appState: AppState.shared)
         }
     }
+
+    /// Momenta is a menu bar app, so closing (or recreating) its only regular
+    /// window must not terminate the process that owns the status item.
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+        false
+    }
 }
