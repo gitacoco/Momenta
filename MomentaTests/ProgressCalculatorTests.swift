@@ -136,6 +136,79 @@ struct ProgressCalculatorTests {
         #expect(progress.actualHours == 0)
     }
 
+    @Test func monthRolloverRunningEntryStillCountsIntoStartMonth() {
+        // Running entry starts July 31 at 23:00; the popover opens August 1 at
+        // 01:00. The entry belongs to July (start month) and its elapsed 2h
+        // count into July's total.
+        let goal = MonthlyGoal(hourlyRate: 100, input: .hours(80))
+        let config = client(goal: goal)
+        let augustFirst = july.end(in: utc).addingTimeInterval(3600)
+        let entries = [
+            TimeEntry(id: 1, clientID: 1, start: date(day: 31, hour: 23), stop: nil),
+        ]
+        let progress = ProgressCalculator.progress(
+            for: config, entries: entries, month: july, timeZone: utc, now: augustFirst
+        )!
+        #expect(progress.actualHours == 2)
+        // The whole month has elapsed: planned-to-date equals the full goal.
+        #expect(progress.plannedHoursToDate == 80)
+    }
+
+    @Test func manualTimeZoneMovesMonthAttribution() {
+        // 2026-07-01T02:00Z is July 1 in UTC but June 30 in UTC-5: with the
+        // manual UTC-5 time zone the entry must not count into July.
+        let goal = MonthlyGoal(hourlyRate: 100, input: .hours(80))
+        let config = client(goal: goal)
+        let entry = TimeEntry(
+            id: 1, clientID: 1,
+            start: july.start(in: utc).addingTimeInterval(2 * 3600),
+            stop: july.start(in: utc).addingTimeInterval(3 * 3600)
+        )
+        let utcMinus5 = TimeZone(secondsFromGMT: -5 * 3600)!
+
+        let inUTC = ProgressCalculator.progress(
+            for: config, entries: [entry], month: july, timeZone: utc, now: date(day: 10)
+        )!
+        let inUTCMinus5 = ProgressCalculator.progress(
+            for: config, entries: [entry], month: july, timeZone: utcMinus5, now: date(day: 10)
+        )!
+        #expect(inUTC.actualHours == 1)
+        #expect(inUTCMinus5.actualHours == 0)
+    }
+
+    @Test func historicalMonthUsesItsRecordedGoalVersion() {
+        let june = YearMonth(year: 2026, month: 6)
+        let juneGoal = MonthlyGoal(hourlyRate: 100, input: .hours(60))
+        let julyGoal = MonthlyGoal(hourlyRate: 120, input: .hours(80))
+        var config = client(goal: julyGoal)
+        config.goalHistory[june] = juneGoal
+
+        let juneProgress = ProgressCalculator.progress(
+            for: config, entries: [], month: june, timeZone: utc, now: date(day: 10)
+        )!
+        let julyProgress = ProgressCalculator.progress(
+            for: config, entries: [], month: july, timeZone: utc, now: date(day: 10)
+        )!
+        // Each month renders against the version recorded for it.
+        #expect(juneProgress.goal == juneGoal)
+        #expect(julyProgress.goal == julyGoal)
+        #expect(juneProgress.points.last?.plannedHours == 60)
+        #expect(julyProgress.points.last?.plannedHours == 80)
+    }
+
+    @Test func decimalRevenueStaysExact() {
+        // 3h at 33.33/h must be exactly 99.99 — no binary floating point drift.
+        let goal = MonthlyGoal(hourlyRate: Decimal(string: "33.33")!, input: .hours(100))
+        let config = client(goal: goal)
+        let entries = [
+            TimeEntry(id: 1, clientID: 1, start: date(day: 2, hour: 9), stop: date(day: 2, hour: 12)),
+        ]
+        let progress = ProgressCalculator.progress(
+            for: config, entries: entries, month: july, timeZone: utc, now: date(day: 3)
+        )!
+        #expect(progress.actualRevenue == Decimal(string: "99.99")!)
+    }
+
     // MARK: Uncategorized
 
     @Test func uncategorizedSplitsByCause() {
