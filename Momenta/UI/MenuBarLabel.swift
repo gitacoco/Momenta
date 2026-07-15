@@ -1,4 +1,14 @@
+import AppKit
 import SwiftUI
+
+/// Metrics derived from AppKit's current menu-bar font so custom progress
+/// glyphs follow the active system appearance instead of assuming a fixed
+/// status-item height.
+private enum MenuBarMetrics {
+    static var glyphSize: CGFloat {
+        ceil(NSFont.menuBarFont(ofSize: 0).boundingRectForFont.height)
+    }
+}
 
 /// Pure presentation data shared by the real status item, Settings preview,
 /// accessibility, and tests. Geometry clamps progress later; raw fractions
@@ -103,7 +113,7 @@ struct MenuBarLabel: View {
 
                 if presentation.aggregation != nil, !presentation.clients.isEmpty {
                     Divider()
-                        .frame(height: 12)
+                        .frame(height: MenuBarMetrics.glyphSize)
                         .padding(.horizontal, 2)
                 }
 
@@ -142,7 +152,7 @@ struct MenuBarLabel: View {
                 }
                 WaterlineProgressGlyph(fraction: object.fraction)
             }
-            .frame(height: 14)
+            .frame(height: MenuBarMetrics.glyphSize)
         }
     }
 }
@@ -184,7 +194,7 @@ private struct RingProgressGlyph: View {
                     .minimumScaleFactor(0.7)
             }
         }
-        .frame(width: 14, height: 14)
+        .frame(width: MenuBarMetrics.glyphSize, height: MenuBarMetrics.glyphSize)
         .accessibilityHidden(true)
     }
 }
@@ -221,7 +231,7 @@ private struct WaterlineProgressGlyph: View {
             }
             .clipShape(Capsule())
         }
-        .frame(width: 4, height: 14)
+        .frame(width: 4, height: MenuBarMetrics.glyphSize)
         .accessibilityHidden(true)
     }
 }

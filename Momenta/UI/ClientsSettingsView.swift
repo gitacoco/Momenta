@@ -238,7 +238,7 @@ struct ClientDetailColumn: View {
 
 /// Right-hand configuration pane for one client. Owns the shared goal draft:
 /// the rate lives in the profile section, hours/revenue in the goal section,
-/// and one save action versions them together.
+/// and every complete edit versions them together automatically.
 private struct ClientDetailView: View {
     @Environment(AppState.self) private var appState
     let client: ClientConfig
@@ -263,7 +263,8 @@ private struct ClientDetailView: View {
     var body: some View {
         Form {
             if client.isEnabled, !client.isArchivedInToggl,
-               client.state(for: appState.currentMonth) == .needsSetup {
+               client.state(for: appState.currentMonth) == .needsSetup,
+               missingRate || missingGoal {
                 needsSetupSection
             }
 
@@ -430,9 +431,6 @@ private struct ClientDetailView: View {
                     }
                     if missingGoal {
                         setupItem("Enter a monthly goal in hours or revenue", target: .hours)
-                    }
-                    if !missingRate && !missingGoal {
-                        setupItem("Press Save in Monthly Goal to apply", target: .hours)
                     }
                 }
                 .padding(.leading, 24)

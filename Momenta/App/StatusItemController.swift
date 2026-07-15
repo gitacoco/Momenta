@@ -38,8 +38,8 @@ final class StatusItemController: NSObject {
             NSLayoutConstraint.activate([
                 hosting.leadingAnchor.constraint(equalTo: button.leadingAnchor),
                 hosting.trailingAnchor.constraint(equalTo: button.trailingAnchor),
-                hosting.topAnchor.constraint(equalTo: button.topAnchor),
-                hosting.bottomAnchor.constraint(equalTo: button.bottomAnchor),
+                hosting.centerYAnchor.constraint(equalTo: button.centerYAnchor),
+                hosting.heightAnchor.constraint(lessThanOrEqualTo: button.heightAnchor),
             ])
             button.target = self
             button.action = #selector(handleClick)

@@ -116,6 +116,11 @@ struct GoalEditorSection: View {
                 }
             }
         }
+        // Persist every complete draft change. Focus/submit hooks below remain
+        // as safety nets for formatter updates that settle at edit boundaries.
+        .onChange(of: draft) { _, _ in
+            commitIfDirty()
+        }
         // Auto-save when focus leaves any goal-related field.
         .onChange(of: focus.wrappedValue) { oldValue, newValue in
             let goalFields: Set<ClientField> = [.rate, .hours, .revenue]
@@ -175,9 +180,9 @@ struct GoalEditorSection: View {
 
     // MARK: Saving
 
-    /// Auto-save: a complete, changed draft persists as soon as editing
-    /// pauses. Scope is always "this month and onward"; rewriting history
-    /// hides behind the explicit menu + confirmation.
+    /// Auto-save: every complete, changed draft persists immediately. Scope
+    /// is always "this month and onward"; rewriting history hides behind the
+    /// explicit menu + confirmation.
     private func commitIfDirty() {
         guard draft.monthlyGoal != nil, isDirty else { return }
         apply(retroactive: false)
