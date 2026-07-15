@@ -19,15 +19,20 @@ final class StatusItemController: NSObject {
 
         popover.behavior = .transient
         popover.animates = false
-        popover.contentViewController = NSHostingController(
+        let hostingController = NSHostingController(
             rootView: DashboardView().environment(appState)
         )
+        hostingController.sizingOptions = [.preferredContentSize]
+        popover.contentViewController = hostingController
 
         if let button = statusItem.button {
             // SwiftUI renders the label so it live-updates with app state.
             let hosting = NSHostingView(
                 rootView: MenuBarLabelContainer().environment(appState)
             )
+            hosting.sizingOptions = [.intrinsicContentSize]
+            hosting.setContentHuggingPriority(.required, for: .horizontal)
+            hosting.setContentCompressionResistancePriority(.required, for: .horizontal)
             hosting.translatesAutoresizingMaskIntoConstraints = false
             button.addSubview(hosting)
             NSLayoutConstraint.activate([
@@ -123,11 +128,14 @@ private struct MenuBarLabelContainer: View {
     @Environment(AppState.self) private var appState
 
     var body: some View {
-        MenuBarLabel(
-            aggregate: appState.menuBarAggregate,
-            split: appState.displaySettings.perClientSplit
-        )
-        .padding(.horizontal, 6)
-        .fixedSize()
+        TimelineView(.periodic(from: .now, by: 60)) { context in
+            MenuBarLabel(
+                aggregate: appState.menuBarAggregate(at: context.date),
+                settings: appState.displaySettings
+            )
+        }
+        .padding(.horizontal, 5)
+        .fixedSize(horizontal: true, vertical: false)
+        .allowsHitTesting(false)
     }
 }

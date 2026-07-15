@@ -176,9 +176,15 @@ enum ProgressCalculator {
         month: YearMonth,
         period: AggregationPeriod,
         timeZone: TimeZone,
-        now: Date
+        now: Date,
+        periodReference: Date? = nil
     ) -> AggregateProgress {
-        let interval = periodInterval(period: period, month: month, timeZone: timeZone, now: now)
+        let interval = periodInterval(
+            period: period,
+            month: month,
+            timeZone: timeZone,
+            now: periodReference ?? now
+        )
 
         var shares: [AggregateProgress.ClientShare] = []
         for client in clients where client.state(for: month) == .configured {

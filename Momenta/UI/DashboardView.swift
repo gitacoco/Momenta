@@ -4,6 +4,10 @@ import SwiftUI
 struct DashboardView: View {
     @Environment(AppState.self) private var appState
 
+    /// The content remains scrollable for long client lists, but shorter
+    /// lists report their natural height to the hosting controller.
+    private let maximumContentHeight: CGFloat = 582
+
     var body: some View {
         VStack(spacing: 0) {
             header
@@ -12,40 +16,14 @@ struct DashboardView: View {
             Divider()
             footer
         }
-        // Height follows the estimated content size (NSPopover tracks the
-        // hosting view's preferred size), capped so long lists scroll.
-        .frame(width: 380, height: popoverHeight)
+        // Only the width is fixed. The hosting controller derives the
+        // popover height from the view's actual content.
+        .frame(width: 380)
         .task {
             // Refresh when the popover opens, throttled so repeated opens
             // don't burn the API quota.
             await appState.refreshIfNeeded()
         }
-    }
-
-    /// Estimated content height so the popover hugs its content instead of
-    /// leaving dead space, while long lists stay scrollable under the cap.
-    private var popoverHeight: CGFloat {
-        let chromeHeight: CGFloat = 78 // header + footer + dividers
-        guard !appState.visibleClients.isEmpty else { return 380 }
-        var content: CGFloat = 24 // scroll padding
-        if appState.selectedSnapshot == nil {
-            content += 66
-        }
-        if let uncategorized = appState.uncategorized, uncategorized.noClientHours > 0.05 {
-            content += 50
-        }
-        let progressByID = appState.progressByClientID
-        for client in appState.visibleClients {
-            if progressByID[client.id] != nil {
-                content += 226
-            } else if client.state(for: appState.selectedMonth) != .disabled {
-                content += 48
-            } else {
-                continue
-            }
-            content += 10
-        }
-        return min(660, chromeHeight + content)
     }
 
     // MARK: Header
@@ -96,7 +74,6 @@ struct DashboardView: View {
     private var content: some View {
         if appState.visibleClients.isEmpty {
             EmptyStateView()
-                .frame(maxHeight: .infinity)
         } else {
             let progressByID = appState.progressByClientID
             ScrollView {
@@ -122,7 +99,11 @@ struct DashboardView: View {
                 }
                 .padding(12)
             }
-            .frame(maxHeight: .infinity)
+            // The frame caps long lists. `fixedSize` then asks the scroll
+            // view for its ideal height, so short lists fit their content
+            // instead of expanding to the cap.
+            .frame(maxHeight: maximumContentHeight)
+            .fixedSize(horizontal: false, vertical: true)
         }
     }
 

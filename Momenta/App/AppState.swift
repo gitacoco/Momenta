@@ -312,16 +312,22 @@ final class AppState {
         return "No data fetched for this month yet."
     }
 
-    var menuBarAggregate: AggregateProgress? {
-        guard let snapshot = snapshots[currentMonth] else { return nil }
+    func menuBarAggregate(at periodReference: Date) -> AggregateProgress? {
+        let month = YearMonth(containing: periodReference, timeZone: timeZone)
+        guard let snapshot = snapshots[month] else { return nil }
         return ProgressCalculator.aggregate(
             clients: clients,
             entries: snapshot.entries,
-            month: currentMonth,
+            month: month,
             period: displaySettings.aggregationPeriod,
             timeZone: timeZone,
-            now: snapshot.fetchedAt
+            now: snapshot.fetchedAt,
+            periodReference: periodReference
         )
+    }
+
+    var menuBarAggregate: AggregateProgress? {
+        menuBarAggregate(at: Date())
     }
 
     var hasConfiguredClients: Bool {

@@ -59,8 +59,8 @@ struct ClientCardView: View {
                         y: .value("Planned", value(planned: point)),
                         series: .value("Series", "Planned")
                     )
-                    .lineStyle(StrokeStyle(lineWidth: 1.5, dash: [4, 3]))
-                    .foregroundStyle(.secondary)
+                    .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 3]))
+                    .foregroundStyle(Color(nsColor: .tertiaryLabelColor))
                 }
             }
             ForEach(progress.points.filter { $0.actualHours != nil }) { point in

@@ -3,9 +3,9 @@
 Native macOS menu bar app that turns Toggl Track time entries into clear
 monthly hours and revenue progress for hourly-based freelance work.
 
-- **Menu bar**: total goal progress at a glance, aggregated by day / week /
-  month, optionally split per client. Cross-client aggregation is always
-  revenue-based.
+- **Menu bar**: goal progress at a glance for Day / Week / Month. Show the
+  aggregate, individual clients, or both, rendered as compact rings or
+  waterlines. Cross-client aggregation is always revenue-based.
 - **Popover**: one card per enabled client with a planned-vs-actual chart
   (weekday or calendar-day pacing), ahead/behind status, and the remaining
   daily pace needed to hit the goal. Historical months can be reviewed
@@ -25,9 +25,10 @@ M1–M4 feature-complete, pending real-account end-to-end validation (BON-17).
   you edited last is authoritative). Goals are versioned per month —
   editing affects this month onward unless you explicitly confirm a
   retroactive rewrite.
-- **Read**: the menu bar shows total progress for the chosen period
-  (Day/Week/Month, optionally split per client); the popover shows per-client
-  planned-vs-actual charts, pace metrics, and historical months.
+- **Read**: the menu bar shows aggregate progress, per-client progress, or
+  both for the chosen period (Day/Week/Month) as rings or waterlines; the
+  popover shows per-client planned-vs-actual charts, pace metrics, and
+  historical months.
 - **Trust**: data refreshes only when the popover opens (throttled) or on
   manual refresh; the last snapshot stays visible offline with a stale
   indicator. Momenta is read-only over Toggl. Before a Toggl account is

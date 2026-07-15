@@ -1,33 +1,227 @@
 import SwiftUI
 
-/// The always-visible menu bar item: total goal progress for the configured
-/// aggregation period, optionally split per client. Revenue-based throughout.
+/// Pure presentation data shared by the real status item, Settings preview,
+/// accessibility, and tests. Geometry clamps progress later; raw fractions
+/// stay intact so values above 100% remain truthful to assistive technology.
+struct MenuBarPresentation: Equatable, Sendable {
+    struct ProgressObject: Identifiable, Equatable, Sendable {
+        var id: String
+        var name: String
+        var monogram: String?
+        var fraction: Double?
+
+        var accessibilityDescription: String {
+            if let fraction {
+                return "\(name) \(Format.percent(fraction))"
+            }
+            return "\(name) no goal"
+        }
+    }
+
+    var objectMode: MenuBarObjectMode
+    var visualization: MenuBarVisualization
+    var period: AggregationPeriod
+    var aggregation: ProgressObject?
+    var clients: [ProgressObject]
+
+    init(aggregate: AggregateProgress?, settings: DisplaySettings) {
+        objectMode = settings.menuBarObjectMode
+        visualization = settings.menuBarVisualization
+        period = settings.aggregationPeriod
+
+        guard let aggregate, !aggregate.shares.isEmpty else {
+            aggregation = nil
+            clients = []
+            return
+        }
+
+        let aggregateObject = ProgressObject(
+            id: "aggregation",
+            name: "Overall",
+            monogram: nil,
+            fraction: aggregate.targetRevenue > 0 ? aggregate.fraction : nil
+        )
+        let clientObjects = aggregate.shares.map { share in
+            let name = share.client.displayName
+            let firstCharacter = name
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .prefix(1)
+                .uppercased()
+            return ProgressObject(
+                id: "client-\(share.id)",
+                name: name,
+                monogram: firstCharacter.isEmpty ? "•" : String(firstCharacter.prefix(1)),
+                fraction: share.targetRevenue > 0 ? share.fraction : nil
+            )
+        }
+
+        switch objectMode {
+        case .aggregation:
+            aggregation = aggregateObject
+            clients = []
+        case .split:
+            aggregation = nil
+            clients = clientObjects
+        case .both:
+            aggregation = aggregateObject
+            clients = clientObjects
+        }
+    }
+
+    var isEmpty: Bool {
+        aggregation == nil && clients.isEmpty
+    }
+
+    var accessibilityValue: String {
+        let objects = [aggregation].compactMap { $0 } + clients
+        guard !objects.isEmpty else {
+            return "\(period.accessibilityLabel), progress unavailable"
+        }
+        return ([period.accessibilityLabel] + objects.map(\.accessibilityDescription))
+            .joined(separator: ", ")
+    }
+}
+
+/// The compact status-item label. Progress is encoded directly in ring or
+/// waterline glyphs; no redundant percentage strings consume menu-bar space.
 struct MenuBarLabel: View {
     var aggregate: AggregateProgress?
-    var split: Bool
+    var settings: DisplaySettings
 
     var body: some View {
-        HStack(spacing: 4) {
-            Image(systemName: "gauge.with.needle")
-            Text(text)
-                .monospacedDigit()
+        let presentation = MenuBarPresentation(aggregate: aggregate, settings: settings)
+
+        HStack(spacing: 6) {
+            if presentation.isEmpty {
+                Text("—")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+            } else {
+                if let aggregation = presentation.aggregation {
+                    progressGlyph(aggregation, style: presentation.visualization)
+                }
+
+                if presentation.aggregation != nil, !presentation.clients.isEmpty {
+                    Divider()
+                        .frame(height: 12)
+                        .padding(.horizontal, 2)
+                }
+
+                if !presentation.clients.isEmpty {
+                    HStack(spacing: 5) {
+                        ForEach(presentation.clients) { client in
+                            progressGlyph(client, style: presentation.visualization)
+                        }
+                    }
+                }
+            }
+
+            Text(presentation.period.menuBarLabel)
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
         }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Momenta")
+        .accessibilityValue(presentation.accessibilityValue)
     }
 
-    private var text: String {
-        guard let aggregate, !aggregate.shares.isEmpty else { return "—" }
-        if split {
-            return aggregate.shares
-                .map { "\($0.client.displayName.prefix(1)) \(shareText($0))" }
-                .joined(separator: " · ")
+    @ViewBuilder
+    private func progressGlyph(
+        _ object: MenuBarPresentation.ProgressObject,
+        style: MenuBarVisualization
+    ) -> some View {
+        switch style {
+        case .ring:
+            RingProgressGlyph(fraction: object.fraction, monogram: object.monogram)
+        case .waterline:
+            HStack(spacing: 1) {
+                if let monogram = object.monogram {
+                    Text(monogram)
+                        .font(.system(size: 8, weight: .semibold, design: .rounded))
+                        .foregroundStyle(.primary)
+                }
+                WaterlineProgressGlyph(fraction: object.fraction)
+            }
+            .frame(height: 14)
         }
-        // Zero target: e.g. Day view on a weekend when every client paces by
-        // weekdays. Show "no goal" rather than a misleading 0%.
-        guard aggregate.targetRevenue > 0 else { return "—" }
-        return Format.percent(aggregate.fraction)
+    }
+}
+
+private struct RingProgressGlyph: View {
+    @Environment(\.colorSchemeContrast) private var colorSchemeContrast
+
+    var fraction: Double?
+    var monogram: String?
+
+    private var clampedFraction: Double {
+        guard let fraction, fraction.isFinite else { return 0 }
+        return min(max(fraction, 0), 1)
     }
 
-    private func shareText(_ share: AggregateProgress.ClientShare) -> String {
-        share.targetRevenue > 0 ? Format.percent(share.fraction) : "—"
+    private var trackOpacity: Double {
+        colorSchemeContrast == .increased ? 0.45 : 0.24
+    }
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .stroke(Color.primary.opacity(trackOpacity), lineWidth: 2)
+
+            if clampedFraction > 0 {
+                Circle()
+                    .trim(from: 0, to: clampedFraction)
+                    .stroke(
+                        Color.primary,
+                        style: StrokeStyle(lineWidth: 2, lineCap: .round)
+                    )
+                    .rotationEffect(.degrees(-90))
+            }
+
+            if let monogram {
+                Text(monogram)
+                    .font(.system(size: 8, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.primary)
+                    .minimumScaleFactor(0.7)
+            }
+        }
+        .frame(width: 14, height: 14)
+        .accessibilityHidden(true)
+    }
+}
+
+private struct WaterlineProgressGlyph: View {
+    @Environment(\.colorSchemeContrast) private var colorSchemeContrast
+    @Environment(\.displayScale) private var displayScale
+
+    var fraction: Double?
+
+    private var clampedFraction: Double {
+        guard let fraction, fraction.isFinite else { return 0 }
+        return min(max(fraction, 0), 1)
+    }
+
+    private var trackOpacity: Double {
+        colorSchemeContrast == .increased ? 0.45 : 0.24
+    }
+
+    var body: some View {
+        GeometryReader { proxy in
+            let rawHeight = proxy.size.height * clampedFraction
+            let pixelAlignedHeight = (rawHeight * displayScale).rounded(.down) / displayScale
+
+            ZStack(alignment: .bottom) {
+                Capsule()
+                    .fill(Color.primary.opacity(trackOpacity))
+
+                if pixelAlignedHeight > 0 {
+                    Rectangle()
+                        .fill(Color.primary)
+                        .frame(height: pixelAlignedHeight)
+                }
+            }
+            .clipShape(Capsule())
+        }
+        .frame(width: 4, height: 14)
+        .accessibilityHidden(true)
     }
 }

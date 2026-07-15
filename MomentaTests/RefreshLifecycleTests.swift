@@ -196,7 +196,8 @@ struct RefreshLifecycleTests {
             autoRefresh: false
         )
         appState.displaySettings.aggregationPeriod = .week
-        appState.displaySettings.perClientSplit = true
+        appState.displaySettings.menuBarObjectMode = .both
+        appState.displaySettings.menuBarVisualization = .waterline
 
         let relaunched = AppState(
             provider: CountingProvider(),
@@ -207,6 +208,7 @@ struct RefreshLifecycleTests {
             autoRefresh: false
         )
         #expect(relaunched.displaySettings.aggregationPeriod == .week)
-        #expect(relaunched.displaySettings.perClientSplit == true)
+        #expect(relaunched.displaySettings.menuBarObjectMode == .both)
+        #expect(relaunched.displaySettings.menuBarVisualization == .waterline)
     }
 }

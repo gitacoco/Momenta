@@ -311,6 +311,32 @@ struct ProgressCalculatorTests {
         #expect(aggregate.actualRevenue == 0)
     }
 
+    @Test func periodReferenceCanAdvanceWithoutRepricingCachedActuals() {
+        let goal = MonthlyGoal(hourlyRate: 100, input: .hours(31))
+        let config = client(pacing: .calendarDays, goal: goal)
+        let entries = [
+            TimeEntry(
+                id: 1,
+                clientID: 1,
+                start: date(day: 15, hour: 9),
+                stop: date(day: 15, hour: 10)
+            ),
+        ]
+
+        let aggregate = ProgressCalculator.aggregate(
+            clients: [config],
+            entries: entries,
+            month: july,
+            period: .day,
+            timeZone: utc,
+            now: date(day: 15, hour: 12),
+            periodReference: date(day: 16, hour: 8)
+        )
+
+        #expect(aggregate.targetRevenue == 100)
+        #expect(aggregate.actualRevenue == 0)
+    }
+
     @Test func dayPeriodIntervalIsSingleDayInsideMonth() {
         let now = date(day: 15, hour: 10)
         let interval = ProgressCalculator.periodInterval(period: .day, month: july, timeZone: utc, now: now)

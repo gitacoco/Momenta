@@ -211,11 +211,12 @@ struct SettingsView: View {
             // Hero: the menu bar item itself — everything below configures it.
             SwiftUI.Section {
                 VStack(spacing: 10) {
-                    MenuBarLabel(
-                        aggregate: appState.menuBarAggregate,
-                        split: appState.displaySettings.perClientSplit
-                    )
-                    .font(.title3)
+                    TimelineView(.periodic(from: .now, by: 60)) { context in
+                        MenuBarLabel(
+                            aggregate: appState.menuBarAggregate(at: context.date),
+                            settings: appState.displaySettings
+                        )
+                    }
                     .padding(.horizontal, 18)
                     .padding(.vertical, 9)
                     .background(Capsule().fill(.quaternary.opacity(0.6)))
@@ -228,14 +229,26 @@ struct SettingsView: View {
             }
 
             SwiftUI.Section("Menu bar") {
-                Picker("Aggregation period", selection: $appState.displaySettings.aggregationPeriod) {
+                Picker("Display objects", selection: $appState.displaySettings.menuBarObjectMode) {
+                    ForEach(MenuBarObjectMode.allCases) { mode in
+                        Text(mode.label).tag(mode)
+                    }
+                }
+                .pickerStyle(.segmented)
+
+                Picker("Time period", selection: $appState.displaySettings.aggregationPeriod) {
                     ForEach(AggregationPeriod.allCases) { period in
                         Text(period.label).tag(period)
                     }
                 }
                 .pickerStyle(.segmented)
 
-                Toggle("Split per client", isOn: $appState.displaySettings.perClientSplit)
+                Picker("Visualization", selection: $appState.displaySettings.menuBarVisualization) {
+                    ForEach(MenuBarVisualization.allCases) { visualization in
+                        Text(visualization.label).tag(visualization)
+                    }
+                }
+                .pickerStyle(.segmented)
             }
 
             SwiftUI.Section {
