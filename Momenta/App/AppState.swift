@@ -271,6 +271,28 @@ final class AppState {
         clients.filter { $0.state(for: selectedMonth) == .needsSetup }
     }
 
+    /// Every enabled, non-archived client. Each of these always gets a row in
+    /// the popover — with data, with a "needs setup" prompt, or with an
+    /// explicit "no data" explanation. Nothing enabled ever disappears.
+    var visibleClients: [ClientConfig] {
+        clients.filter { $0.isEnabled && !$0.isArchivedInToggl }
+    }
+
+    var progressByClientID: [Int: ClientProgress] {
+        Dictionary(uniqueKeysWithValues: progresses.map { ($0.client.id, $0) })
+    }
+
+    /// Why data for the selected month may be missing, in user terms.
+    var dataUnavailableReason: String {
+        if let message = lastError {
+            return message
+        }
+        if !account.isConnected {
+            return "Not connected to Toggl."
+        }
+        return "No data fetched for this month yet."
+    }
+
     var menuBarAggregate: AggregateProgress? {
         guard let snapshot = snapshots[currentMonth] else { return nil }
         return ProgressCalculator.aggregate(

@@ -12,7 +12,9 @@ struct DashboardView: View {
             Divider()
             footer
         }
-        .frame(width: 380)
+        // Fixed size: MenuBarExtra windows measure their content once and do
+        // not reliably grow with it, which can leave the popover collapsed.
+        .frame(width: 380, height: 500)
         .task {
             // Refresh when the popover opens, throttled so repeated opens
             // don't burn the API quota.
@@ -79,25 +81,102 @@ struct DashboardView: View {
 
     @ViewBuilder
     private var content: some View {
-        if appState.progresses.isEmpty && !appState.hasConfiguredClients {
+        if appState.visibleClients.isEmpty {
             EmptyStateView()
+                .frame(maxHeight: .infinity)
         } else {
+            let progressByID = appState.progressByClientID
             ScrollView {
                 VStack(spacing: 10) {
+                    if appState.selectedSnapshot == nil {
+                        dataUnavailableBanner
+                    }
                     if let uncategorized = appState.uncategorized, uncategorized.noClientHours > 0.05 {
                         uncategorizedBanner(hours: uncategorized.noClientHours)
                     }
-                    ForEach(appState.progresses) { progress in
-                        ClientCardView(progress: progress, unit: appState.displayUnit)
-                    }
-                    if !appState.needsSetupClients.isEmpty {
-                        needsSetupHint
+                    // Every enabled client gets a row — data, setup prompt,
+                    // or an explicit reason why there's nothing to show.
+                    ForEach(appState.visibleClients) { client in
+                        switch client.state(for: appState.selectedMonth) {
+                        case .configured:
+                            if let progress = progressByID[client.id] {
+                                ClientCardView(progress: progress, unit: appState.displayUnit)
+                            } else {
+                                noDataCard(client)
+                            }
+                        case .needsSetup:
+                            setupCard(client)
+                        case .disabled, .archived:
+                            EmptyView()
+                        }
                     }
                 }
                 .padding(12)
             }
-            .frame(maxHeight: 520)
+            .frame(maxHeight: .infinity)
         }
+    }
+
+    /// Shown when the selected month has no snapshot at all: the numbers
+    /// aren't just empty, they're absent — say so and offer a retry.
+    private var dataUnavailableBanner: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Image(systemName: "icloud.slash")
+                .foregroundStyle(.orange)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("No data for this month")
+                    .font(.callout.weight(.semibold))
+                Text(appState.dataUnavailableReason)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            Button("Retry") {
+                Task { await appState.refresh(force: true) }
+            }
+            .disabled(appState.isLoading)
+        }
+        .padding(10)
+        .background(RoundedRectangle(cornerRadius: 8).fill(.orange.opacity(0.1)))
+    }
+
+    /// A configured client whose data couldn't be loaded still shows up,
+    /// with the reason, instead of silently vanishing.
+    private func noDataCard(_ client: ClientConfig) -> some View {
+        HStack(spacing: 8) {
+            Circle()
+                .fill(Color(hex: client.colorHex))
+                .frame(width: 9, height: 9)
+            Text(client.displayName)
+                .font(.headline)
+            Spacer()
+            Text(appState.dataUnavailableReason)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+        }
+        .padding(12)
+        .background(RoundedRectangle(cornerRadius: 10).fill(Color(nsColor: .controlBackgroundColor)))
+    }
+
+    private func setupCard(_ client: ClientConfig) -> some View {
+        HStack(spacing: 8) {
+            Circle()
+                .fill(Color(hex: client.colorHex))
+                .frame(width: 9, height: 9)
+            Text(client.displayName)
+                .font(.headline)
+            Text("needs a rate and goal")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+            Spacer()
+            SettingsLink {
+                Text("Set up")
+                    .font(.callout)
+            }
+        }
+        .padding(12)
+        .background(RoundedRectangle(cornerRadius: 10).fill(Color(nsColor: .controlBackgroundColor)))
     }
 
     private func uncategorizedBanner(hours: Decimal) -> some View {
@@ -110,32 +189,6 @@ struct DashboardView: View {
         }
         .padding(10)
         .background(RoundedRectangle(cornerRadius: 8).fill(.yellow.opacity(0.12)))
-    }
-
-    private var needsSetupHint: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "slider.horizontal.3")
-                .foregroundStyle(.secondary)
-            Text(needsSetupText)
-                .font(.callout)
-                .foregroundStyle(.secondary)
-            Spacer()
-            SettingsLink {
-                Text("Set up")
-                    .font(.callout)
-            }
-        }
-        .padding(10)
-        .background(RoundedRectangle(cornerRadius: 8).fill(.quaternary.opacity(0.4)))
-    }
-
-    private var needsSetupText: String {
-        let names = appState.needsSetupClients.map(\.displayName).joined(separator: ", ")
-        let waiting = appState.uncategorized?.needsSetupHours ?? 0
-        if waiting > 0.05 {
-            return "\(names): set a rate and goal — \(Format.hours(waiting)) waiting to count"
-        }
-        return "\(names): set a rate and goal to start tracking"
     }
 
     // MARK: Footer
