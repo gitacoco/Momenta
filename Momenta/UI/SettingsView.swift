@@ -43,11 +43,7 @@ struct SettingsView: View {
             case .account:
                 AccountSettingsView()
             case .clients:
-                placeholder(
-                    icon: "person.2",
-                    title: "Clients",
-                    message: "The Toggl client list, enable switches, and the goal editor arrive with BON-13."
-                )
+                ClientsSettingsView()
             case .display:
                 displaySettings
             }
@@ -77,19 +73,31 @@ struct SettingsView: View {
                 .background(RoundedRectangle(cornerRadius: 6).fill(.quaternary.opacity(0.5)))
             }
 
-            LabeledContent("Time zone") {
-                Text("System (\(TimeZone.current.identifier)) — picker arrives with BON-13")
+            Picker("Time zone", selection: $appState.displaySettings.timeZoneIdentifier) {
+                Text("System (\(TimeZone.current.identifier))").tag(String?.none)
+                ForEach(TimeZone.knownTimeZoneIdentifiers, id: \.self) { identifier in
+                    Text(identifier).tag(String?.some(identifier))
+                }
+            }
+
+            LabeledContent("Current month boundaries") {
+                Text(monthBoundaryExample)
+                    .font(.caption.monospacedDigit())
                     .foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)
     }
 
-    private func placeholder(icon: String, title: String, message: String) -> some View {
-        ContentUnavailableView {
-            Label(title, systemImage: icon)
-        } description: {
-            Text(message)
-        }
+    /// Example of how the chosen time zone resolves the current month, so the
+    /// effect of the setting is visible immediately.
+    private var monthBoundaryExample: String {
+        let timeZone = appState.timeZone
+        let month = appState.currentMonth
+        var style = Date.FormatStyle(date: .abbreviated, time: .shortened)
+        style.timeZone = timeZone
+        let start = month.start(in: timeZone).formatted(style)
+        let end = month.end(in: timeZone).formatted(style)
+        return "\(start) – \(end)"
     }
 }

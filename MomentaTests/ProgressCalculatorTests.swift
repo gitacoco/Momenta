@@ -235,9 +235,8 @@ struct MockDataProviderTests {
         #expect(snapshot.entries.allSatisfy { $0.start <= now && ($0.stop ?? now) <= now })
     }
 
-    @Test func clientsCoverAllFourStates() async throws {
-        let provider = MockDataProvider()
-        let clients = try await provider.loadClients()
+    @Test func clientsCoverAllFourStates() {
+        let clients = MockDataProvider.sampleClients()
         let month = YearMonth(containing: Date(), timeZone: .current)
         let states = Set(clients.map { $0.state(for: month) })
         #expect(states.contains(.configured))

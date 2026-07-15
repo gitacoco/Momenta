@@ -6,24 +6,41 @@ import Observation
 final class AppState {
     private let provider: any DataProvider
     let account: AccountManager
+    let config: ConfigStore
 
-    var clients: [ClientConfig] = []
     var snapshots: [YearMonth: TimeEntrySnapshot] = [:]
     var displaySettings = DisplaySettings()
     var selectedMonth: YearMonth
     var availableMonths: [YearMonth] = []
     var isLoading = false
     var lastError: String?
+    var clientListLoading = false
+    var clientListError: String?
     /// Popover chart unit toggle. View state only, resets with the process.
     var displayUnit: DisplayUnit = .revenue
 
-    init(provider: any DataProvider, account: AccountManager = AccountManager()) {
+    init(
+        provider: any DataProvider,
+        account: AccountManager = AccountManager(),
+        config: ConfigStore = ConfigStore()
+    ) {
         self.provider = provider
         self.account = account
+        self.config = config
         self.selectedMonth = YearMonth(containing: Date(), timeZone: .current)
         Task {
             await self.refresh()
         }
+    }
+
+    /// Client configs driving all display. ConfigStore holds the real,
+    /// Toggl-reconciled configs; before any account is connected the demo
+    /// clients keep the dashboard alive.
+    var clients: [ClientConfig] {
+        if !config.clients.isEmpty {
+            return config.clients
+        }
+        return account.isConnected ? [] : MockDataProvider.sampleClients()
     }
 
     var timeZone: TimeZone {
@@ -44,7 +61,6 @@ final class AppState {
         defer { isLoading = false }
         let now = Date()
         do {
-            clients = try await provider.loadClients()
             availableMonths = try await provider.availableMonths(asOf: now, timeZone: timeZone)
             snapshots[currentMonth] = try await provider.loadSnapshot(for: currentMonth, timeZone: timeZone, now: now)
             if selectedMonth != currentMonth {
@@ -60,6 +76,28 @@ final class AppState {
     /// Drops all cached month data. Offered when disconnecting the account.
     func clearCache() {
         snapshots.removeAll()
+    }
+
+    /// Fetches the Toggl client list (all workspaces, sequentially to respect
+    /// free-plan limits) and reconciles it into ConfigStore. Called when the
+    /// Clients settings page opens and from its manual refresh button.
+    func refreshClientList() async {
+        guard let api = account.apiClient() else { return }
+        clientListLoading = true
+        defer { clientListLoading = false }
+        do {
+            let workspaces = try await api.workspaces()
+            var allClients: [TogglClientDTO] = []
+            for workspace in workspaces {
+                allClients += try await api.clients(workspaceID: workspace.id)
+            }
+            config.merge(workspaces: workspaces, togglClients: allClients)
+            clientListError = nil
+        } catch let error as TogglAPIError {
+            clientListError = error.errorDescription
+        } catch {
+            clientListError = error.localizedDescription
+        }
     }
 
     func select(month: YearMonth) {

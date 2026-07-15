@@ -6,7 +6,9 @@ struct MockDataProvider: DataProvider {
     /// Number of past months (besides the current one) that have data.
     private let historyDepth = 2
 
-    func loadClients() async throws -> [ClientConfig] {
+    /// Demo client configs shown while no Toggl account is connected. Never
+    /// persisted into ConfigStore, so they can't pollute real data.
+    static func sampleClients() -> [ClientConfig] {
         let thisMonth = YearMonth(containing: Date(), timeZone: .current)
         let lastMonth = thisMonth.previous
 
