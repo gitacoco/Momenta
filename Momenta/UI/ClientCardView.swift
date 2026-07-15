@@ -2,7 +2,8 @@ import SwiftUI
 import Charts
 
 /// One client's monthly progress: planned vs actual chart plus pace metrics.
-/// Fully driven by configuration and calculated data — no hard-coded clients.
+/// The ahead/behind delta is drawn where it exists — as the gap between the
+/// two lines at "today" — and restated in the metrics row.
 struct ClientCardView: View {
     var progress: ClientProgress
     var unit: DisplayUnit
@@ -11,12 +12,18 @@ struct ClientCardView: View {
         Color(hex: progress.client.colorHex)
     }
 
+    private var deltaColor: Color {
+        progress.isAhead ? .green : .red
+    }
+
+    private var currencyCode: String {
+        progress.client.currency
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 6) {
-                Circle()
-                    .fill(clientColor)
-                    .frame(width: 9, height: 9)
+                ClientAvatar(client: progress.client, size: 16)
                 Text(progress.client.displayName)
                     .font(.headline)
                 if progress.points.contains(where: { $0.actualHours != nil }) == false {
@@ -25,7 +32,6 @@ struct ClientCardView: View {
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
-                deltaBadge
             }
             chart
                 .frame(height: 110)
@@ -39,6 +45,10 @@ struct ClientCardView: View {
     }
 
     // MARK: Chart
+
+    private var todayPoint: DayProgressPoint? {
+        progress.points.last(where: { $0.actualHours != nil })
+    }
 
     private var chart: some View {
         Chart {
@@ -65,10 +75,29 @@ struct ClientCardView: View {
                 .lineStyle(StrokeStyle(lineWidth: 2))
                 .foregroundStyle(clientColor)
             }
-            if let today = progress.points.last(where: { $0.actualHours != nil })?.day {
-                RuleMark(x: .value("Today", today))
-                    .lineStyle(StrokeStyle(lineWidth: 1, dash: [2, 2]))
-                    .foregroundStyle(.tertiary)
+            // The delta, drawn where it lives: the gap between actual and
+            // planned at today, colored by ahead/behind.
+            if let today = todayPoint {
+                let actualY = value(actual: today)
+                let plannedY = value(planned: today)
+                RuleMark(
+                    x: .value("Today", today.day),
+                    yStart: .value("From", min(actualY, plannedY)),
+                    yEnd: .value("To", max(actualY, plannedY))
+                )
+                .lineStyle(StrokeStyle(lineWidth: 2, lineCap: .round))
+                .foregroundStyle(deltaColor.opacity(0.75))
+                .annotation(position: .trailing, alignment: .leading, spacing: 4) {
+                    Text(deltaShortText)
+                        .font(.caption2.weight(.semibold).monospacedDigit())
+                        .foregroundStyle(deltaColor)
+                }
+                PointMark(
+                    x: .value("Today", today.day),
+                    y: .value("Actual", actualY)
+                )
+                .symbolSize(36)
+                .foregroundStyle(clientColor)
             }
         }
         .chartLegend(.hidden)
@@ -93,26 +122,20 @@ struct ClientCardView: View {
 
     // MARK: Metrics
 
-    private var deltaBadge: some View {
-        Text(deltaText)
-            .font(.caption.weight(.semibold).monospacedDigit())
-            .padding(.horizontal, 7)
-            .padding(.vertical, 3)
-            .background(
-                Capsule().fill(progress.isAhead ? Color.green.opacity(0.15) : Color.red.opacity(0.15))
-            )
-            .foregroundStyle(progress.isAhead ? .green : .red)
-    }
-
-    private var currencyCode: String {
-        progress.client.currency
-    }
-
-    private var deltaText: String {
+    private var deltaShortText: String {
         switch unit {
         case .revenue: return Format.signedCurrency(progress.deltaRevenue, code: currencyCode)
         case .hours: return Format.signedHours(progress.deltaHours)
         }
+    }
+
+    private var deltaLineText: String {
+        let magnitude: String
+        switch unit {
+        case .revenue: magnitude = Format.currency(abs(progress.deltaRevenue), code: currencyCode)
+        case .hours: magnitude = Format.hours(abs(progress.deltaHours))
+        }
+        return "\(progress.isAhead ? "▲" : "▼") \(magnitude) \(progress.isAhead ? "ahead" : "behind")"
     }
 
     private var metrics: some View {
@@ -126,8 +149,9 @@ struct ClientCardView: View {
             }
             Spacer()
             VStack(alignment: .trailing, spacing: 2) {
-                Text("\(Format.hours(progress.requiredDailyHours))/day to goal")
-                    .font(.caption.monospacedDigit())
+                Text(deltaLineText)
+                    .font(.callout.weight(.semibold).monospacedDigit())
+                    .foregroundStyle(deltaColor)
                 Text(secondaryText)
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -150,10 +174,12 @@ struct ClientCardView: View {
     }
 
     private var secondaryText: String {
+        let logged: String
         switch unit {
-        case .revenue: return "\(Format.hours(progress.actualHours)) logged"
-        case .hours: return "\(Format.currency(progress.actualRevenue, code: currencyCode)) earned"
+        case .revenue: logged = "\(Format.hours(progress.actualHours)) logged"
+        case .hours: logged = "\(Format.currency(progress.actualRevenue, code: currencyCode)) earned"
         }
+        return "\(Format.hours(progress.requiredDailyHours))/day to goal · \(logged)"
     }
 }
 

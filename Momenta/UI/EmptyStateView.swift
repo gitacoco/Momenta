@@ -5,7 +5,6 @@ import SwiftUI
 /// inside the Settings window; remaining settings rely on defaults.
 struct EmptyStateView: View {
     @Environment(AppState.self) private var appState
-    @Environment(\.openSettings) private var openSettings
 
     private var tokenDone: Bool {
         appState.account.isConnected
@@ -34,7 +33,7 @@ struct EmptyStateView: View {
             Button(tokenDone ? "Continue in Settings" : "Open Settings") {
                 // Land on the step the user is actually on.
                 appState.pendingSettingsDestination = tokenDone ? .clients(clientID: nil) : .account
-                openSettings()
+                openSettingsWindow()
             }
             .keyboardShortcut(",", modifiers: .command)
         }

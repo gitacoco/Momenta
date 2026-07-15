@@ -3,7 +3,6 @@ import SwiftUI
 /// Popover content: month navigation, unit toggle, client cards, warnings.
 struct DashboardView: View {
     @Environment(AppState.self) private var appState
-    @Environment(\.openSettings) private var openSettings
 
     var body: some View {
         VStack(spacing: 0) {
@@ -13,14 +12,40 @@ struct DashboardView: View {
             Divider()
             footer
         }
-        // Fixed size: MenuBarExtra windows measure their content once and do
-        // not reliably grow with it, which can leave the popover collapsed.
-        .frame(width: 380, height: 500)
+        // Height follows the estimated content size (NSPopover tracks the
+        // hosting view's preferred size), capped so long lists scroll.
+        .frame(width: 380, height: popoverHeight)
         .task {
             // Refresh when the popover opens, throttled so repeated opens
             // don't burn the API quota.
             await appState.refreshIfNeeded()
         }
+    }
+
+    /// Estimated content height so the popover hugs its content instead of
+    /// leaving dead space, while long lists stay scrollable under the cap.
+    private var popoverHeight: CGFloat {
+        let chromeHeight: CGFloat = 78 // header + footer + dividers
+        guard !appState.visibleClients.isEmpty else { return 380 }
+        var content: CGFloat = 24 // scroll padding
+        if appState.selectedSnapshot == nil {
+            content += 66
+        }
+        if let uncategorized = appState.uncategorized, uncategorized.noClientHours > 0.05 {
+            content += 50
+        }
+        for client in appState.visibleClients {
+            switch client.state(for: appState.selectedMonth) {
+            case .configured:
+                content += appState.progressByClientID[client.id] != nil ? 226 : 48
+            case .needsSetup:
+                content += 48
+            case .disabled, .archived:
+                continue
+            }
+            content += 10
+        }
+        return min(660, chromeHeight + content)
     }
 
     // MARK: Header
@@ -132,9 +157,7 @@ struct DashboardView: View {
     /// with the reason, instead of silently vanishing.
     private func noDataCard(_ client: ClientConfig) -> some View {
         HStack(spacing: 8) {
-            Circle()
-                .fill(Color(hex: client.colorHex))
-                .frame(width: 9, height: 9)
+            ClientAvatar(client: client, size: 16)
             Text(client.displayName)
                 .font(.headline)
             Spacer()
@@ -149,9 +172,7 @@ struct DashboardView: View {
 
     private func setupCard(_ client: ClientConfig) -> some View {
         HStack(spacing: 8) {
-            Circle()
-                .fill(Color(hex: client.colorHex))
-                .frame(width: 9, height: 9)
+            ClientAvatar(client: client, size: 16)
             Text(client.displayName)
                 .font(.headline)
             Text("needs a rate and goal")
@@ -161,7 +182,7 @@ struct DashboardView: View {
             Button("Set up") {
                 // Deep-link straight to this client's configuration.
                 appState.pendingSettingsDestination = .clients(clientID: client.id)
-                openSettings()
+                openSettingsWindow()
             }
             .font(.callout)
         }
@@ -206,17 +227,11 @@ struct DashboardView: View {
             .disabled(appState.isLoading)
 
             Button {
-                openSettings()
+                openSettingsWindow()
             } label: {
                 Image(systemName: "gearshape")
             }
             .buttonStyle(.borderless)
-
-            Button("Quit") {
-                NSApplication.shared.terminate(nil)
-            }
-            .buttonStyle(.borderless)
-            .font(.caption)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
@@ -237,7 +252,7 @@ struct DashboardView: View {
             if apiError == .unauthorized {
                 Button("Reconnect") {
                     appState.pendingSettingsDestination = .account
-                    openSettings()
+                    openSettingsWindow()
                 }
                 .font(.caption)
             }

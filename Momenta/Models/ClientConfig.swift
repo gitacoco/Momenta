@@ -37,6 +37,9 @@ struct ClientConfig: Identifiable, Hashable, Codable, Sendable {
     /// cross-client aggregation still sums raw numbers. Optional so configs
     /// persisted before this field decode cleanly.
     var currencyCode: String? = nil
+    /// File name of an uploaded logo in the local logo store; nil falls back
+    /// to the brand-color dot.
+    var logoFileName: String? = nil
 
     var currency: String {
         currencyCode ?? "USD"

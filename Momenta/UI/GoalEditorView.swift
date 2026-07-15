@@ -36,30 +36,33 @@ struct GoalEditorSection: View {
 
     var body: some View {
         Section {
-            HStack(alignment: .bottom, spacing: 12) {
+            HStack(alignment: .bottom) {
                 converterField(
                     "Hours",
                     value: hoursBinding,
                     focusTag: .hours,
-                    width: 120
+                    width: 120,
+                    alignment: .leading
                 )
+                Spacer()
                 Image(systemName: "arrow.left.arrow.right")
                     .foregroundStyle(.secondary)
                     .padding(.bottom, 5)
+                Spacer()
                 converterField(
                     "Revenue (\(client.currency))",
                     value: revenueBinding,
                     focusTag: .revenue,
-                    width: 140
+                    width: 140,
+                    alignment: .trailing
                 )
-                Spacer()
             }
             .padding(.vertical, 2)
         } header: {
             HStack(alignment: .firstTextBaseline) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Monthly Goal")
-                    Text("Hours and revenue stay in sync — edit either side. Changes apply from \(Format.monthTitle(month, timeZone: appState.timeZone)) onward.")
+                    Text("Changes apply from \(Format.monthTitle(month, timeZone: appState.timeZone)) onward.")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                         .textCase(nil)
@@ -97,17 +100,19 @@ struct GoalEditorSection: View {
         _ title: String,
         value: Binding<Decimal?>,
         focusTag: ClientField,
-        width: CGFloat
+        width: CGFloat,
+        alignment: HorizontalAlignment
     ) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: alignment, spacing: 4) {
             Text(title)
                 .font(.caption)
                 .foregroundStyle(.secondary)
-            TextField("0", value: value, format: .number.precision(.fractionLength(0...2)))
+            TextField(title, value: value, format: .number.precision(.fractionLength(0...2)))
                 .textFieldStyle(.roundedBorder)
                 .multilineTextAlignment(.trailing)
                 .frame(width: width)
                 .focused(focus, equals: focusTag)
+                .labelsHidden()
         }
     }
 

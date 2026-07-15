@@ -10,6 +10,10 @@ enum SettingsDestination: Equatable, Sendable {
 @MainActor
 @Observable
 final class AppState {
+    /// Single instance shared by the status item (AppKit) and the SwiftUI
+    /// Settings scene.
+    static let shared = AppState(provider: MockDataProvider())
+
     /// Demo data source used before any Toggl account is connected.
     private let fallbackProvider: any DataProvider
     private var togglProvider: TogglDataProvider?

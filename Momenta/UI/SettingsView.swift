@@ -47,16 +47,19 @@ struct SettingsView: View {
             Group {
                 switch selection {
                 case .account:
-                    pane(title: "Account") { AccountSettingsView() }
+                    AccountSettingsView()
                 case .clients:
                     ClientsSettingsView()
                 case .display:
-                    pane(title: "Display") { displaySettings }
+                    displaySettings
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .frame(minWidth: 720, maxWidth: .infinity, minHeight: 480, maxHeight: .infinity)
+        // The page name lives in the window's heading area, like System
+        // Settings, not in the content region.
+        .navigationTitle(selection.label)
         .onAppear(perform: consumeDestination)
         .onChange(of: appState.pendingSettingsDestination) {
             consumeDestination()
@@ -74,14 +77,6 @@ struct SettingsView: View {
             selection = .clients
         case nil:
             break
-        }
-    }
-
-    /// Every content pane carries a header naming the selected page.
-    private func pane(title: String, @ViewBuilder content: () -> some View) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            SettingsPaneHeader(title: title)
-            content()
         }
     }
 
@@ -144,21 +139,5 @@ struct SettingsView: View {
         let start = month.start(in: timeZone).formatted(style)
         let end = month.end(in: timeZone).formatted(style)
         return "\(start) – \(end)"
-    }
-}
-
-/// Shared page header for settings panes: names the current page (or the
-/// selected client) at the top of its column.
-struct SettingsPaneHeader: View {
-    let title: String
-
-    var body: some View {
-        Text(title)
-            .font(.title3.weight(.semibold))
-            .lineLimit(1)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 16)
-            .padding(.top, 14)
-            .padding(.bottom, 6)
     }
 }

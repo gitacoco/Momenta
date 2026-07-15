@@ -2,25 +2,24 @@ import SwiftUI
 
 @main
 struct MomentaApp: App {
-    @State private var appState = AppState(provider: MockDataProvider())
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
     var body: some Scene {
-        MenuBarExtra {
-            DashboardView()
-                .environment(appState)
-        } label: {
-            MenuBarLabel(
-                aggregate: appState.menuBarAggregate,
-                split: appState.displaySettings.perClientSplit
-            )
-        }
-        .menuBarExtraStyle(.window)
-
         Settings {
             SettingsView()
-                .environment(appState)
+                .environment(AppState.shared)
         }
         // Freely resizable above the content's minimum size.
         .windowResizability(.contentMinSize)
+    }
+}
+
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    private var statusItemController: StatusItemController?
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        MainActor.assumeIsolated {
+            statusItemController = StatusItemController(appState: AppState.shared)
+        }
     }
 }

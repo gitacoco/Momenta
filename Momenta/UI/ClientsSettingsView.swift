@@ -1,5 +1,6 @@
 import SwiftUI
 import Charts
+import UniformTypeIdentifiers
 
 /// Settings → Clients: the full Toggl client list (no manual add) with enable
 /// switches, drag-to-reorder, and a detail pane for local configuration.
@@ -23,6 +24,7 @@ struct ClientsSettingsView: View {
                 }
             }
         }
+        .navigationSubtitle(selectedClientName ?? "")
         .task {
             // Fetch once when the page opens; the footer button re-fetches.
             await appState.refreshClientList()
@@ -31,6 +33,10 @@ struct ClientsSettingsView: View {
         .onChange(of: appState.pendingSettingsDestination) {
             consumeDeepLink()
         }
+    }
+
+    private var selectedClientName: String? {
+        selectedClientID.flatMap { appState.config.client(id: $0)?.displayName }
     }
 
     /// Selects the client a popover deep link asked for.
@@ -90,7 +96,6 @@ struct ClientsSettingsView: View {
 
     private var listPane: some View {
         VStack(alignment: .leading, spacing: 0) {
-            SettingsPaneHeader(title: "Clients")
             List(selection: $selectedClientID) {
                 if isMultiWorkspace {
                     ForEach(workspaceNames, id: \.self) { workspace in
@@ -166,9 +171,7 @@ struct ClientsSettingsView: View {
 
     private func clientRow(_ client: ClientConfig) -> some View {
         HStack(spacing: 6) {
-            Circle()
-                .fill(Color(hex: client.colorHex))
-                .frame(width: 8, height: 8)
+            ClientAvatar(client: client, size: 14)
             Text(client.displayName)
             Spacer()
             Toggle("", isOn: enabledBinding(client))
@@ -181,9 +184,7 @@ struct ClientsSettingsView: View {
 
     private func archivedRow(_ client: ClientConfig) -> some View {
         HStack(spacing: 6) {
-            Circle()
-                .fill(Color(hex: client.colorHex))
-                .frame(width: 8, height: 8)
+            ClientAvatar(client: client, size: 14)
             Text(client.displayName)
             Spacer()
             Text("Archived")
@@ -208,11 +209,8 @@ struct ClientsSettingsView: View {
     @ViewBuilder
     private var detail: some View {
         if let id = selectedClientID, let client = appState.config.client(id: id) {
-            VStack(alignment: .leading, spacing: 0) {
-                SettingsPaneHeader(title: client.displayName)
-                ClientDetailView(client: client, showsWorkspace: isMultiWorkspace)
-            }
-            .id(id) // reset editor state when switching clients
+            ClientDetailView(client: client, showsWorkspace: isMultiWorkspace)
+                .id(id) // reset editor state when switching clients
         } else {
             ContentUnavailableView {
                 Label("Select a Client", systemImage: "person.crop.rectangle")
@@ -231,6 +229,7 @@ private struct ClientDetailView: View {
     let client: ClientConfig
     let showsWorkspace: Bool
     @State private var draft: GoalDraft
+    @State private var showLogoImporter = false
     @FocusState private var focusedField: ClientField?
 
     init(client: ClientConfig, showsWorkspace: Bool) {
@@ -253,27 +252,26 @@ private struct ClientDetailView: View {
             }
 
             Section("Client Profile") {
+                LabeledContent("Name on Toggl", value: client.togglName)
                 LabeledContent("Display name") {
-                    TextField("Display name", text: displayNameBinding, prompt: Text(client.togglName))
+                    TextField("Display name", text: displayNameBinding)
                         .textFieldStyle(.roundedBorder)
                         .frame(width: 220)
                         .multilineTextAlignment(.trailing)
                         .focused($focusedField, equals: .displayName)
                         .labelsHidden()
                 }
-                ColorPicker("Color", selection: colorBinding, supportsOpacity: false)
-                if client.displayNameOverride != nil {
-                    LabeledContent("Toggl name", value: client.togglName)
-                }
+                logoRow
+                ColorPicker("Brand color", selection: colorBinding, supportsOpacity: false)
                 if showsWorkspace {
                     LabeledContent("Workspace", value: client.workspaceName)
                 }
                 LabeledContent("Hourly rate") {
                     HStack(spacing: 6) {
-                        TextField("0", value: rateBinding, format: .number)
+                        TextField("Rate", value: rateBinding, format: .number)
                             .textFieldStyle(.roundedBorder)
                             .multilineTextAlignment(.trailing)
-                            .frame(width: 90)
+                            .frame(width: 70)
                             .focused($focusedField, equals: .rate)
                             .labelsHidden()
                         Picker("Currency", selection: currencyBinding) {
@@ -304,6 +302,47 @@ private struct ClientDetailView: View {
         }
         .formStyle(.grouped)
         .disabled(client.isArchivedInToggl)
+    }
+
+    // MARK: Logo
+
+    private var logoRow: some View {
+        LabeledContent("Logo") {
+            HStack(spacing: 8) {
+                ClientAvatar(client: appState.config.client(id: client.id) ?? client, size: 22)
+                Button("Choose…") {
+                    showLogoImporter = true
+                }
+                if appState.config.client(id: client.id)?.logoFileName != nil {
+                    Button("Remove") {
+                        removeLogo()
+                    }
+                }
+            }
+        }
+        .fileImporter(
+            isPresented: $showLogoImporter,
+            allowedContentTypes: [.image]
+        ) { result in
+            guard case .success(let url) = result else { return }
+            importLogo(from: url)
+        }
+    }
+
+    private func importLogo(from url: URL) {
+        guard var updated = appState.config.client(id: client.id) else { return }
+        guard let fileName = try? LogoStore.importLogo(from: url, for: client.id) else { return }
+        updated.logoFileName = fileName
+        appState.config.update(updated)
+    }
+
+    private func removeLogo() {
+        guard var updated = appState.config.client(id: client.id) else { return }
+        if let fileName = updated.logoFileName {
+            LogoStore.deleteLogo(named: fileName)
+        }
+        updated.logoFileName = nil
+        appState.config.update(updated)
     }
 
     // MARK: Needs setup (itemized, click-to-focus)
@@ -360,7 +399,7 @@ private struct ClientDetailView: View {
                 Text("Weekdays only").tag(PacingMode.weekdays)
                 Text("Every calendar day").tag(PacingMode.calendarDays)
             }
-            .pickerStyle(.segmented)
+            .pickerStyle(.menu)
 
             VStack(alignment: .leading, spacing: 4) {
                 pacingPreview
@@ -418,13 +457,16 @@ private struct ClientDetailView: View {
 
     // MARK: Bindings
 
+    /// Prefilled with the effective name; storing the Toggl name (or nothing)
+    /// clears the override rather than persisting a redundant copy.
     private var displayNameBinding: Binding<String> {
         Binding {
-            appState.config.client(id: client.id)?.displayNameOverride ?? ""
+            let config = appState.config.client(id: client.id)
+            return config?.displayNameOverride ?? config?.togglName ?? client.togglName
         } set: { newValue in
             guard var updated = appState.config.client(id: client.id) else { return }
             let trimmed = newValue.trimmingCharacters(in: .whitespaces)
-            updated.displayNameOverride = trimmed.isEmpty ? nil : trimmed
+            updated.displayNameOverride = (trimmed.isEmpty || trimmed == updated.togglName) ? nil : trimmed
             appState.config.update(updated)
         }
     }
