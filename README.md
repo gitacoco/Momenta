@@ -15,8 +15,23 @@ monthly hours and revenue progress for hourly-based freelance work.
 
 ## Status
 
-M1 (mock-driven shell) — the full UI runs against a deterministic mock data
-provider. Toggl connectivity lands with M2.
+M1–M4 feature-complete, pending real-account end-to-end validation (BON-17).
+
+- **Connect**: Settings → Account, paste your Toggl API token (Toggl Track →
+  Profile → API Token). The token lives only in the macOS Keychain.
+- **Configure**: Settings → Clients lists every client from all your Toggl
+  workspaces (grouped by workspace). Enable the ones to track and set an
+  hourly rate plus a monthly goal (hours and revenue stay in sync; the side
+  you edited last is authoritative). Goals are versioned per month —
+  editing affects this month onward unless you explicitly confirm a
+  retroactive rewrite.
+- **Read**: the menu bar shows total progress for the chosen period
+  (Day/Week/Month, optionally split per client); the popover shows per-client
+  planned-vs-actual charts, pace metrics, and historical months.
+- **Trust**: data refreshes only when the popover opens (throttled) or on
+  manual refresh; the last snapshot stays visible offline with a stale
+  indicator. Momenta is read-only over Toggl. Before a Toggl account is
+  connected the app runs on deterministic demo data.
 
 ## Requirements
 
