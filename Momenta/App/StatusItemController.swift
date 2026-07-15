@@ -120,9 +120,11 @@ final class SettingsWindowController {
             let hosting = NSHostingController(
                 rootView: SettingsView().environment(AppState.shared)
             )
+            // Let SwiftUI drive the window's toolbar and title so the
+            // NavigationSplitView gets the native glass heading treatment.
+            hosting.sceneBridgingOptions = [.toolbars, .title]
             let window = NSWindow(contentViewController: hosting)
             window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
-            window.title = "Momenta Settings"
             window.isReleasedWhenClosed = false
             window.center()
             window.setFrameAutosaveName("MomentaSettingsWindow")

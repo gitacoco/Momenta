@@ -29,23 +29,27 @@ struct SettingsView: View {
     }
 
     @Environment(AppState.self) private var appState
-    @State private var selection: Section = .account
+    @State private var selection: Section? = .account
+
+    private var currentSection: Section {
+        selection ?? .account
+    }
 
     var body: some View {
-        HStack(spacing: 0) {
+        // NavigationSplitView so the window gets the native (Liquid Glass)
+        // toolbar treatment: the page title lives in the real heading area
+        // and content scrolls beneath it.
+        NavigationSplitView {
             List(Section.allCases, selection: $selection) { section in
                 Label(section.label, systemImage: section.icon)
                     .tag(section)
             }
-            .listStyle(.sidebar)
-            .scrollDisabled(true)
-            .frame(width: 170)
-
-            Divider()
-                .ignoresSafeArea(.container, edges: .top)
-
+            .navigationSplitViewColumnWidth(min: 170, ideal: 180, max: 220)
+            // Settings sidebars never collapse.
+            .toolbar(removing: .sidebarToggle)
+        } detail: {
             Group {
-                switch selection {
+                switch currentSection {
                 case .account:
                     AccountSettingsView()
                 case .clients:
@@ -57,9 +61,7 @@ struct SettingsView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .frame(minWidth: 720, maxWidth: .infinity, minHeight: 480, maxHeight: .infinity)
-        // The page name lives in the window's heading area, like System
-        // Settings, not in the content region.
-        .navigationTitle(selection.label)
+        .navigationTitle(currentSection.label)
         .onAppear(perform: consumeDestination)
         .onChange(of: appState.pendingSettingsDestination) {
             consumeDestination()
