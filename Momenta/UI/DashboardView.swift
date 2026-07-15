@@ -57,8 +57,8 @@ struct DashboardView: View {
                 .font(.callout)
                 .foregroundStyle(.secondary)
             Picker("Display goals in", selection: $appState.displayUnit) {
-                Image(systemName: "dollarsign").tag(DisplayUnit.revenue)
                 Image(systemName: "clock").tag(DisplayUnit.hours)
+                Image(systemName: "dollarsign").tag(DisplayUnit.revenue)
             }
             .pickerStyle(.segmented)
             .labelsHidden()

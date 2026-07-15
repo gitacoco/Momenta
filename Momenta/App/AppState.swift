@@ -48,7 +48,7 @@ final class AppState {
     var clientListLoading = false
     var clientListError: String?
     /// Popover chart unit toggle. View state only, resets with the process.
-    var displayUnit: DisplayUnit = .revenue
+    var displayUnit: DisplayUnit = .hours
     /// Set right before opening the Settings window to land on a specific
     /// page (and client). Consumed by SettingsView / ClientsSettingsView.
     var pendingSettingsDestination: SettingsDestination?
