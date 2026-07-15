@@ -81,6 +81,7 @@ struct SettingsView: View {
             .toolbar { navigatorToolbar }
         }
         .frame(minWidth: 720, maxWidth: .infinity, maxHeight: .infinity)
+        .blocksPrimarySidebarDivider()
     }
 
     /// Clients is one window-level three-column split. Nesting another split
@@ -97,11 +98,13 @@ struct SettingsView: View {
         } detail: {
             ClientDetailColumn(selectedClientID: selectedClientID)
                 .navigationSplitViewColumnWidth(min: 480, ideal: 680, max: .infinity)
-                .overlay(alignment: .topLeading) {
-                    detailTitlebar(title: selectedClientName)
-                }
+                .marksDetailColumnBounds()
         }
         .frame(minWidth: 900, maxWidth: .infinity, maxHeight: .infinity)
+        .blocksPrimarySidebarDivider()
+        .addsDetailTitlebar {
+            detailTitlebar(title: selectedClientName)
+        }
     }
 
     private var primarySidebar: some View {
@@ -113,9 +116,9 @@ struct SettingsView: View {
         .scrollDisabled(true)
         .frame(minWidth: 180, idealWidth: 180, maxWidth: 180)
         .navigationSplitViewColumnWidth(min: 180, ideal: 180, max: 180)
-        .background(LockedNavigationSplitColumn(width: 180))
         // Settings sidebars never collapse or expose a sidebar toggle.
         .toolbar(removing: .sidebarToggle)
+        .marksPrimarySidebarBounds()
     }
 
     private var selectedClientName: String? {
@@ -138,7 +141,6 @@ struct SettingsView: View {
             }
         }
         .frame(height: 52)
-        .offset(x: -1, y: -52)
         .allowsHitTesting(false)
     }
 
