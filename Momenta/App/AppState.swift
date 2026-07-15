@@ -10,29 +10,64 @@ final class AppState {
     private var togglProviderGeneration = -1
     let account: AccountManager
     let config: ConfigStore
+    private let snapshotCache: SnapshotCache
+    private let defaults: UserDefaults
+
+    private static let displaySettingsKey = "momenta.displaySettings"
+    /// Repeated popover opens within this window reuse the last fetch.
+    static let minAutoRefreshInterval: TimeInterval = 60
 
     var snapshots: [YearMonth: TimeEntrySnapshot] = [:]
-    var displaySettings = DisplaySettings()
+    var displaySettings = DisplaySettings() {
+        didSet {
+            if let data = try? JSONEncoder().encode(displaySettings) {
+                defaults.set(data, forKey: Self.displaySettingsKey)
+            }
+            if oldValue.timeZoneIdentifier != displaySettings.timeZoneIdentifier {
+                handleTimeZoneChange()
+            }
+        }
+    }
     var selectedMonth: YearMonth
     var availableMonths: [YearMonth] = []
     var isLoading = false
     var lastError: String?
+    /// Classified error from the most recent failed fetch, for state-specific
+    /// icons and recovery paths in the UI.
+    var lastAPIError: TogglAPIError?
     var clientListLoading = false
     var clientListError: String?
     /// Popover chart unit toggle. View state only, resets with the process.
     var displayUnit: DisplayUnit = .revenue
 
+    private var lastAutoRefreshAt: Date?
+
     init(
         provider: any DataProvider,
         account: AccountManager = AccountManager(),
-        config: ConfigStore = ConfigStore()
+        config: ConfigStore = ConfigStore(),
+        snapshotCache: SnapshotCache = SnapshotCache(),
+        defaults: UserDefaults = .standard,
+        autoRefresh: Bool = true
     ) {
         self.fallbackProvider = provider
         self.account = account
         self.config = config
-        self.selectedMonth = YearMonth(containing: Date(), timeZone: .current)
-        Task {
-            await self.refresh()
+        self.snapshotCache = snapshotCache
+        self.defaults = defaults
+        var settings = DisplaySettings()
+        if let data = defaults.data(forKey: Self.displaySettingsKey),
+           let decoded = try? JSONDecoder().decode(DisplaySettings.self, from: data) {
+            settings = decoded
+        }
+        displaySettings = settings
+        // The last successful snapshots stay visible offline and on relaunch.
+        snapshots = snapshotCache.load()
+        selectedMonth = YearMonth(containing: Date(), timeZone: settings.timeZone)
+        if autoRefresh {
+            Task {
+                await self.refresh()
+            }
         }
     }
 
@@ -75,10 +110,21 @@ final class AppState {
 
     // MARK: Loading
 
-    /// Full refresh: available months, current month, and (if needed) the
-    /// selected month. Called when the popover opens or the user asks for a
-    /// refresh.
-    func refresh() async {
+    /// Popover-open path: throttled so repeatedly opening and closing the
+    /// popover cannot burn through the API quota. Manual refresh bypasses.
+    func refreshIfNeeded() async {
+        if let last = lastAutoRefreshAt,
+           Date().timeIntervalSince(last) < Self.minAutoRefreshInterval {
+            return
+        }
+        await refresh()
+    }
+
+    /// Full refresh: available months, the current month, and the selected
+    /// month. Historical months are treated as stable — they refetch only on
+    /// a manual (forced) refresh.
+    func refresh(force: Bool = false) async {
+        lastAutoRefreshAt = Date()
         guard let provider = activeProvider() else {
             // Offline-by-choice (disconnected, real data cached): no fetching.
             availableMonths = Set(snapshots.keys).union([currentMonth]).sorted()
@@ -90,20 +136,46 @@ final class AppState {
         do {
             let fetchable = try await provider.availableMonths(asOf: now, timeZone: timeZone)
             availableMonths = Set(fetchable).union(snapshots.keys).sorted()
-            snapshots[currentMonth] = try await provider.loadSnapshot(for: currentMonth, timeZone: timeZone, now: now)
-            if selectedMonth != currentMonth, snapshots[selectedMonth] == nil {
-                snapshots[selectedMonth] = try await provider.loadSnapshot(for: selectedMonth, timeZone: timeZone, now: now)
+            store(try await provider.loadSnapshot(for: currentMonth, timeZone: timeZone, now: now), for: currentMonth)
+            if selectedMonth != currentMonth, force || snapshots[selectedMonth] == nil {
+                store(try await provider.loadSnapshot(for: selectedMonth, timeZone: timeZone, now: now), for: selectedMonth)
             }
             lastError = nil
+            lastAPIError = nil
             account.markSynced(at: now)
         } catch {
-            lastError = error.localizedDescription
+            recordFetchError(error)
+        }
+    }
+
+    private func store(_ snapshot: TimeEntrySnapshot, for month: YearMonth) {
+        snapshots[month] = snapshot
+        // Demo data never touches the disk cache.
+        if account.isConnected {
+            snapshotCache.save(snapshots)
+        }
+    }
+
+    private func recordFetchError(_ error: Error) {
+        lastAPIError = error as? TogglAPIError
+        lastError = lastAPIError?.errorDescription ?? error.localizedDescription
+    }
+
+    /// Month boundaries move with the time zone: cached snapshots computed
+    /// under the old zone are invalid, so drop and refetch them.
+    private func handleTimeZoneChange() {
+        snapshots.removeAll()
+        snapshotCache.clear()
+        selectedMonth = currentMonth
+        Task {
+            await self.refresh(force: true)
         }
     }
 
     /// Drops all cached month data. Offered when disconnecting the account.
     func clearCache() {
         snapshots.removeAll()
+        snapshotCache.clear()
     }
 
     /// Fetches the Toggl client list (all workspaces, sequentially to respect
@@ -142,13 +214,23 @@ final class AppState {
         isLoading = true
         defer { isLoading = false }
         do {
-            snapshots[selectedMonth] = try await provider.loadSnapshot(
-                for: selectedMonth, timeZone: timeZone, now: Date()
-            )
+            let month = selectedMonth
+            store(try await provider.loadSnapshot(for: month, timeZone: timeZone, now: Date()), for: month)
             lastError = nil
+            lastAPIError = nil
         } catch {
-            lastError = error.localizedDescription
+            recordFetchError(error)
         }
+    }
+
+    // MARK: Freshness
+
+    /// True when what's on screen is a cached snapshot that could not be (or
+    /// deliberately isn't being) refreshed.
+    var isShowingStaleData: Bool {
+        guard selectedSnapshot != nil else { return false }
+        if lastAPIError != nil { return true }
+        return !account.isConnected && !config.clients.isEmpty
     }
 
     // MARK: Derived state

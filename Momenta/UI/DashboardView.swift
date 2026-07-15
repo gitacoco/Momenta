@@ -14,8 +14,9 @@ struct DashboardView: View {
         }
         .frame(width: 380)
         .task {
-            // Refresh whenever the popover opens; BON-16 adds throttling.
-            await appState.refresh()
+            // Refresh when the popover opens, throttled so repeated opens
+            // don't burn the API quota.
+            await appState.refreshIfNeeded()
         }
     }
 
@@ -56,7 +57,9 @@ struct DashboardView: View {
             .fixedSize()
 
             Button {
-                Task { await appState.refresh() }
+                // Manual refresh bypasses the throttle and refetches the
+                // selected historical month too.
+                Task { await appState.refresh(force: true) }
             } label: {
                 Image(systemName: "arrow.clockwise")
             }
@@ -145,17 +148,8 @@ struct DashboardView: View {
                 Text("Refreshing…")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-            } else if let error = appState.lastError {
-                Image(systemName: "wifi.exclamationmark")
-                    .foregroundStyle(.secondary)
-                Text(error)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-            } else if let fetchedAt = appState.selectedSnapshot?.fetchedAt {
-                Text("Updated \(fetchedAt.formatted(date: .omitted, time: .shortened))")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+            } else {
+                statusLine
             }
             Spacer()
             Button("Quit") {
@@ -166,5 +160,59 @@ struct DashboardView: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
+    }
+
+    /// One line that always tells the user how trustworthy the numbers are
+    /// and what to do next.
+    @ViewBuilder
+    private var statusLine: some View {
+        if let apiError = appState.lastAPIError {
+            Image(systemName: errorIcon(apiError))
+                .foregroundStyle(.orange)
+                .font(.caption)
+            Text(staleSuffix(apiError.errorDescription ?? "Refresh failed"))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+            if apiError == .unauthorized {
+                SettingsLink {
+                    Text("Reconnect")
+                        .font(.caption)
+                }
+            }
+        } else if let error = appState.lastError {
+            Image(systemName: "exclamationmark.triangle")
+                .foregroundStyle(.orange)
+                .font(.caption)
+            Text(staleSuffix(error))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+        } else if appState.isShowingStaleData {
+            Image(systemName: "clock.arrow.circlepath")
+                .foregroundStyle(.orange)
+                .font(.caption)
+            Text("Cached data — connect Toggl to refresh")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        } else if let fetchedAt = appState.selectedSnapshot?.fetchedAt {
+            Text("Updated \(fetchedAt.formatted(date: .omitted, time: .shortened))")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private func errorIcon(_ error: TogglAPIError) -> String {
+        switch error {
+        case .offline: return "wifi.slash"
+        case .unauthorized: return "key.slash"
+        case .rateLimited: return "clock.badge.exclamationmark"
+        case .server, .decoding, .other: return "exclamationmark.triangle"
+        }
+    }
+
+    /// Failure messages mention that cached data is still being shown.
+    private func staleSuffix(_ message: String) -> String {
+        appState.selectedSnapshot != nil ? "\(message) Showing cached data." : message
     }
 }
