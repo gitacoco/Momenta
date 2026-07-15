@@ -14,6 +14,7 @@ struct MomentaApp: App {
                 .environment(AppState.shared)
         }
         .windowResizability(.contentMinSize)
+        .windowToolbarStyle(.unified)
         .defaultLaunchBehavior(.suppressed)
         .handlesExternalEvents(matching: ["settings"])
     }

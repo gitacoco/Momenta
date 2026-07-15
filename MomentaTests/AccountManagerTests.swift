@@ -14,8 +14,9 @@ final class InMemoryTokenStore: TokenStore, @unchecked Sendable {
     func delete() throws { token = nil }
 }
 
-/// Multi-response transport: serves queued responses in order (/me, then
-/// /workspaces) so the connect flow can be driven end to end.
+/// Multi-response transport: serves queued responses in order (/me,
+/// /workspaces, then optional /me/organizations) so the connect flow can be
+/// driven end to end.
 final class SequenceTransport: HTTPTransport, @unchecked Sendable {
     private var queue: [Result<(Data, Int), Error>]
     private(set) var requests: [URLRequest] = []
@@ -42,7 +43,8 @@ final class SequenceTransport: HTTPTransport, @unchecked Sendable {
 @MainActor
 struct AccountManagerTests {
     private static let meJSON = Data(#"{"id":1,"fullname":"Zhibang Jiang","email":"z@example.com"}"#.utf8)
-    private static let workspacesJSON = Data(#"[{"id":101,"name":"Freelance"}]"#.utf8)
+    private static let workspacesJSON = Data(#"[{"id":101,"name":"Freelance","organization_id":10}]"#.utf8)
+    private static let organizationsJSON = Data(#"[{"id":10,"name":"Studio","is_multi_workspace_enabled":false,"subscription":{"plan_name":"Free","enterprise":false}}]"#.utf8)
 
     private func freshDefaults() -> UserDefaults {
         let suite = "MomentaTests.\(UUID().uuidString)"
@@ -57,6 +59,7 @@ struct AccountManagerTests {
         let transport = SequenceTransport([
             .success((Self.meJSON, 200)),
             .success((Self.workspacesJSON, 200)),
+            .success((Self.organizationsJSON, 200)),
         ])
         let manager = AccountManager(tokenStore: store, transport: transport, defaults: defaults)
 
@@ -69,6 +72,8 @@ struct AccountManagerTests {
         }
         #expect(snapshot.fullname == "Zhibang Jiang")
         #expect(snapshot.workspaces.map(\.id) == [101])
+        #expect(snapshot.defaultOrganization?.displayPlanName == "Free")
+        #expect(snapshot.visibleWorkspaces.isEmpty)
 
         // The persisted snapshot must never contain the token.
         let persisted = defaults.data(forKey: "toggl.accountSnapshot").map { String(decoding: $0, as: UTF8.self) } ?? ""
@@ -105,6 +110,7 @@ struct AccountManagerTests {
         let transport = SequenceTransport([
             .success((Self.meJSON, 200)),
             .success((Self.workspacesJSON, 200)),
+            .success((Self.organizationsJSON, 200)),
         ])
         let manager = AccountManager(tokenStore: store, transport: transport, defaults: defaults)
         await manager.connect(token: "tok")
@@ -135,6 +141,33 @@ struct AccountManagerTests {
         #expect(manager.state == .connected(snapshot))
     }
 
+    @Test func relaunchRestoresLegacySnapshotWithoutPlanMetadata() async {
+        struct LegacySnapshot: Codable {
+            var fullname: String
+            var email: String
+            var workspaces: [TogglWorkspace]
+            var connectedAt: Date
+        }
+
+        let store = InMemoryTokenStore(token: "tok")
+        let defaults = freshDefaults()
+        let legacy = LegacySnapshot(
+            fullname: "Zhibang Jiang",
+            email: "z@example.com",
+            workspaces: [TogglWorkspace(id: 101, name: "Freelance")],
+            connectedAt: Date(timeIntervalSince1970: 1_780_000_000)
+        )
+        defaults.set(try! JSONEncoder().encode(legacy), forKey: "toggl.accountSnapshot")
+
+        let manager = AccountManager(tokenStore: store, transport: SequenceTransport([]), defaults: defaults)
+        guard case .connected(let snapshot) = manager.state else {
+            Issue.record("Expected legacy snapshot to remain connected")
+            return
+        }
+        #expect(snapshot.organizations == nil)
+        #expect(snapshot.defaultWorkspaceId == nil)
+    }
+
     @Test func missingTokenMeansDisconnectedEvenWithSnapshot() async {
         let defaults = freshDefaults()
         let snapshot = AccountSnapshot(fullname: "Z", email: "z@x.dev", workspaces: [], connectedAt: Date())
@@ -146,6 +179,55 @@ struct AccountManagerTests {
             defaults: defaults
         )
         #expect(manager.state == .disconnected)
+    }
+
+    @Test func workspaceVisibilityUsesDefaultOrganizationCapabilityNotAccountCount() {
+        let workspaces = [
+            TogglWorkspace(id: 101, name: "Studio", organizationId: 10),
+            TogglWorkspace(id: 202, name: "Community", organizationId: 20),
+        ]
+        let freeOrganizations = [
+            TogglOrganization(
+                id: 10,
+                name: "Personal",
+                subscription: TogglSubscription(planName: "Free", enterprise: false)
+            ),
+            TogglOrganization(
+                id: 20,
+                name: "Volunteer",
+                subscription: TogglSubscription(planName: "Free", enterprise: false)
+            ),
+        ]
+        let freeSnapshot = AccountSnapshot(
+            fullname: "Z",
+            email: "z@x.dev",
+            workspaces: workspaces,
+            connectedAt: Date(),
+            defaultWorkspaceId: 101,
+            organizations: freeOrganizations
+        )
+        #expect(freeSnapshot.visibleWorkspaces.isEmpty)
+
+        let enterpriseWorkspaces = [
+            TogglWorkspace(id: 301, name: "Design", organizationId: 30),
+            TogglWorkspace(id: 302, name: "Engineering", organizationId: 30),
+        ]
+        let enterpriseSnapshot = AccountSnapshot(
+            fullname: "Z",
+            email: "z@x.dev",
+            workspaces: enterpriseWorkspaces,
+            connectedAt: Date(),
+            defaultWorkspaceId: 301,
+            organizations: [
+                TogglOrganization(
+                    id: 30,
+                    name: "Company",
+                    isMultiWorkspaceEnabled: true,
+                    subscription: TogglSubscription(planName: "Enterprise", enterprise: true)
+                )
+            ]
+        )
+        #expect(enterpriseSnapshot.visibleWorkspaces.map(\.id) == [301, 302])
     }
 }
 

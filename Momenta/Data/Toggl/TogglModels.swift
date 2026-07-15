@@ -15,6 +15,73 @@ struct TogglMe: Codable, Equatable, Sendable {
 struct TogglWorkspace: Codable, Equatable, Identifiable, Sendable {
     var id: Int
     var name: String
+    /// Workspaces are billed and grouped through an organization. Older
+    /// cached snapshots predate this field, so it stays optional.
+    var organizationId: Int?
+
+    init(id: Int, name: String, organizationId: Int? = nil) {
+        self.id = id
+        self.name = name
+        self.organizationId = organizationId
+    }
+}
+
+/// Subscription metadata belongs to an organization, not to the user account.
+/// Only the stable fields needed by Settings are modeled.
+struct TogglSubscription: Codable, Equatable, Sendable {
+    var planName: String?
+    var enterprise: Bool?
+
+    init(planName: String? = nil, enterprise: Bool? = nil) {
+        self.planName = planName
+        self.enterprise = enterprise
+    }
+}
+
+struct TogglOrganization: Codable, Equatable, Identifiable, Sendable {
+    var id: Int
+    var name: String
+    var isMultiWorkspaceEnabled: Bool?
+    var subscription: TogglSubscription?
+    /// Deprecated API fields kept only as fallbacks for older Toggl responses.
+    var pricingPlanName: String?
+    var pricingPlanEnterprise: Bool?
+
+    init(
+        id: Int,
+        name: String,
+        isMultiWorkspaceEnabled: Bool? = nil,
+        subscription: TogglSubscription? = nil,
+        pricingPlanName: String? = nil,
+        pricingPlanEnterprise: Bool? = nil
+    ) {
+        self.id = id
+        self.name = name
+        self.isMultiWorkspaceEnabled = isMultiWorkspaceEnabled
+        self.subscription = subscription
+        self.pricingPlanName = pricingPlanName
+        self.pricingPlanEnterprise = pricingPlanEnterprise
+    }
+
+    var displayPlanName: String {
+        if let name = subscription?.planName ?? pricingPlanName,
+           !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return name
+        }
+        return isEnterprise ? "Enterprise" : "Unknown"
+    }
+
+    var isEnterprise: Bool {
+        if subscription?.enterprise == true || pricingPlanEnterprise == true {
+            return true
+        }
+        let name = subscription?.planName ?? pricingPlanName
+        return name?.localizedCaseInsensitiveCompare("Enterprise") == .orderedSame
+    }
+
+    var supportsMultipleWorkspaces: Bool {
+        isMultiWorkspaceEnabled == true || isEnterprise
+    }
 }
 
 /// A client as returned by `GET /workspaces/{id}/clients`.

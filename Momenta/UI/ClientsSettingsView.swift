@@ -2,29 +2,22 @@ import SwiftUI
 import Charts
 import UniformTypeIdentifiers
 
-/// Settings → Clients: the full Toggl client list (no manual add) with enable
-/// switches, drag-to-reorder, and a detail pane for local configuration.
-/// Workspace grouping only appears for multi-workspace (Enterprise) accounts.
-struct ClientsSettingsView: View {
+/// The middle column of Settings → Clients: the full Toggl client list (no
+/// manual add), with enable switches and drag-to-reorder. SettingsView owns
+/// the single window-level NavigationSplitView that contains this column.
+struct ClientsListColumn: View {
     @Environment(AppState.self) private var appState
-    @State private var selectedClientID: Int?
+    @Binding var selectedClientID: Int?
 
     var body: some View {
         Group {
             if appState.config.clients.isEmpty {
                 emptyState
             } else {
-                HStack(spacing: 0) {
-                    listPane
-                        .frame(width: 230)
-                    Divider()
-                        .ignoresSafeArea(.container, edges: .top)
-                    detail
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                }
+                listPane
             }
         }
-        .navigationSubtitle(selectedClientName ?? "")
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .task {
             // Fetch once when the page opens; the footer button re-fetches.
             await appState.refreshClientList()
@@ -33,10 +26,6 @@ struct ClientsSettingsView: View {
         .onChange(of: appState.pendingSettingsDestination) {
             consumeDeepLink()
         }
-    }
-
-    private var selectedClientName: String? {
-        selectedClientID.flatMap { appState.config.client(id: $0)?.displayName }
     }
 
     /// Selects the client a popover deep link asked for.
@@ -95,30 +84,34 @@ struct ClientsSettingsView: View {
     }
 
     private var listPane: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            List(selection: $selectedClientID) {
-                if isMultiWorkspace {
-                    ForEach(workspaceNames, id: \.self) { workspace in
-                        Section(workspace) {
-                            clientRows(activeClients.filter { $0.workspaceName == workspace })
-                        }
+        List(selection: $selectedClientID) {
+            if isMultiWorkspace {
+                ForEach(workspaceNames, id: \.self) { workspace in
+                    Section(workspace) {
+                        clientRows(activeClients.filter { $0.workspaceName == workspace })
                     }
-                } else {
-                    clientRows(activeClients)
                 }
-                if !archivedClients.isEmpty {
-                    Section("Archived") {
-                        ForEach(archivedClients) { client in
-                            archivedRow(client)
-                                .tag(client.id)
-                        }
+            } else {
+                clientRows(activeClients)
+            }
+            if !archivedClients.isEmpty {
+                Section("Archived") {
+                    ForEach(archivedClients) { client in
+                        archivedRow(client)
+                            .tag(client.id)
                     }
                 }
             }
-            .listStyle(.sidebar)
-            .scrollContentBackground(.hidden)
-            Divider()
-            listFooter
+        }
+        .listStyle(.sidebar)
+        .scrollContentBackground(.hidden)
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            VStack(spacing: 0) {
+                Divider()
+                listFooter
+            }
+            .fixedSize(horizontal: false, vertical: true)
+            .background(.background.secondary)
         }
         .background(.background.secondary)
     }
@@ -173,7 +166,16 @@ struct ClientsSettingsView: View {
         HStack(spacing: 6) {
             ClientAvatar(client: client, size: 14)
             Text(client.displayName)
+                .lineLimit(1)
+                .truncationMode(.tail)
             Spacer()
+            if client.state(for: appState.currentMonth) == .needsSetup {
+                Image(systemName: "exclamationmark.circle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+                    .accessibilityLabel("Needs setup")
+                    .help("Finish setup to start tracking")
+            }
             Toggle("", isOn: enabledBinding(client))
                 .toggleStyle(.switch)
                 .controlSize(.mini)
@@ -186,6 +188,8 @@ struct ClientsSettingsView: View {
         HStack(spacing: 6) {
             ClientAvatar(client: client, size: 14)
             Text(client.displayName)
+                .lineLimit(1)
+                .truncationMode(.tail)
             Spacer()
             Text("Archived")
                 .font(.caption2)
@@ -203,20 +207,32 @@ struct ClientsSettingsView: View {
             appState.config.update(updated)
         }
     }
+}
 
-    // MARK: Detail pane
+/// The right-hand Clients column. Its no-selection state fills the complete
+/// column so ContentUnavailableView receives the correct centered proposal;
+/// the selected client's Form remains top-aligned by its own layout.
+struct ClientDetailColumn: View {
+    @Environment(AppState.self) private var appState
+    let selectedClientID: Int?
+
+    private var isMultiWorkspace: Bool {
+        Set(appState.config.clients.map(\.workspaceID)).count > 1
+    }
 
     @ViewBuilder
-    private var detail: some View {
+    var body: some View {
         if let id = selectedClientID, let client = appState.config.client(id: id) {
             ClientDetailView(client: client, showsWorkspace: isMultiWorkspace)
                 .id(id) // reset editor state when switching clients
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         } else {
             ContentUnavailableView {
                 Label("Select a Client", systemImage: "person.crop.rectangle")
             } description: {
                 Text("Pick a client to configure its profile, rate, and goal.")
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
         }
     }
 }
@@ -230,6 +246,7 @@ private struct ClientDetailView: View {
     let showsWorkspace: Bool
     @State private var draft: GoalDraft
     @State private var showLogoImporter = false
+    @State private var logoImportError: String?
     @FocusState private var focusedField: ClientField?
 
     init(client: ClientConfig, showsWorkspace: Bool) {
@@ -255,23 +272,26 @@ private struct ClientDetailView: View {
                 LabeledContent("Name on Toggl", value: client.togglName)
                 LabeledContent("Display name") {
                     TextField("Display name", text: displayNameBinding)
-                        .textFieldStyle(.roundedBorder)
-                        .frame(width: 220)
+                        .textFieldStyle(.plain)
+                        .frame(minWidth: 120, idealWidth: 220, maxWidth: 220)
                         .multilineTextAlignment(.trailing)
                         .focused($focusedField, equals: .displayName)
                         .labelsHidden()
                 }
                 logoRow
-                ColorPicker("Brand color", selection: colorBinding, supportsOpacity: false)
+                centeredControlRow("Brand color") {
+                    ColorPicker("Brand color", selection: colorBinding, supportsOpacity: false)
+                        .labelsHidden()
+                }
                 if showsWorkspace {
                     LabeledContent("Workspace", value: client.workspaceName)
                 }
-                LabeledContent("Hourly rate") {
+                centeredControlRow("Hourly rate") {
                     HStack(spacing: 6) {
                         TextField("Rate", value: rateBinding, format: .number)
-                            .textFieldStyle(.roundedBorder)
+                            .textFieldStyle(.plain)
                             .multilineTextAlignment(.trailing)
-                            .frame(width: 70)
+                            .frame(minWidth: 56, idealWidth: 70, maxWidth: 70)
                             .focused($focusedField, equals: .rate)
                             .labelsHidden()
                         Picker("Currency", selection: currencyBinding) {
@@ -280,7 +300,6 @@ private struct ClientDetailView: View {
                             }
                         }
                         .labelsHidden()
-                        .fixedSize()
                     }
                 }
             }
@@ -301,13 +320,31 @@ private struct ClientDetailView: View {
             GoalHistoryView(client: client)
         }
         .formStyle(.grouped)
+        .fileImporter(
+            isPresented: $showLogoImporter,
+            allowedContentTypes: [.image]
+        ) { result in
+            switch result {
+            case .success(let url):
+                importLogo(from: url)
+            case .failure(let error):
+                let cocoaError = error as NSError
+                guard cocoaError.code != NSUserCancelledError else { return }
+                logoImportError = error.localizedDescription
+            }
+        }
+        .alert("Couldn’t Import Logo", isPresented: logoImportErrorPresented) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(logoImportError ?? "The selected image could not be imported.")
+        }
         .disabled(client.isArchivedInToggl)
     }
 
     // MARK: Logo
 
     private var logoRow: some View {
-        LabeledContent("Logo") {
+        centeredControlRow("Logo") {
             HStack(spacing: 8) {
                 ClientAvatar(client: appState.config.client(id: client.id) ?? client, size: 22)
                 Button("Choose…") {
@@ -320,20 +357,40 @@ private struct ClientDetailView: View {
                 }
             }
         }
-        .fileImporter(
-            isPresented: $showLogoImporter,
-            allowedContentTypes: [.image]
-        ) { result in
-            guard case .success(let url) = result else { return }
-            importLogo(from: url)
+    }
+
+    /// `LabeledContent` aligns on the text baseline, which looks off when the
+    /// trailing control is taller than text. Rows with buttons, color wells,
+    /// or pickers instead share this explicitly centered layout.
+    private func centeredControlRow<Content: View>(
+        _ title: LocalizedStringKey,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        HStack(alignment: .center) {
+            Text(title)
+            Spacer()
+            content()
         }
     }
 
     private func importLogo(from url: URL) {
         guard var updated = appState.config.client(id: client.id) else { return }
-        guard let fileName = try? LogoStore.importLogo(from: url, for: client.id) else { return }
-        updated.logoFileName = fileName
-        appState.config.update(updated)
+        do {
+            updated.logoFileName = try LogoStore.importLogo(from: url, for: client.id)
+            appState.config.update(updated)
+        } catch {
+            logoImportError = error.localizedDescription
+        }
+    }
+
+    private var logoImportErrorPresented: Binding<Bool> {
+        Binding {
+            logoImportError != nil
+        } set: { isPresented in
+            if !isPresented {
+                logoImportError = nil
+            }
+        }
     }
 
     private func removeLogo() {
@@ -358,18 +415,28 @@ private struct ClientDetailView: View {
     private var needsSetupSection: some View {
         Section {
             VStack(alignment: .leading, spacing: 8) {
-                Label("Finish setup to start tracking", systemImage: "exclamationmark.circle.fill")
+                HStack(spacing: 8) {
+                    Image(systemName: "exclamationmark.circle.fill")
+                        .foregroundStyle(.orange)
+                        .accessibilityHidden(true)
+                    Text("Finish setup to start tracking")
+                        .foregroundStyle(.primary)
+                }
                     .font(.callout.weight(.semibold))
-                    .foregroundStyle(.orange)
-                if missingRate {
-                    setupItem("Set an hourly rate", target: .rate)
+                    .accessibilityElement(children: .combine)
+                    .accessibilityAddTraits(.isHeader)
+                VStack(alignment: .leading, spacing: 8) {
+                    if missingRate {
+                        setupItem("Set an hourly rate", target: .rate)
+                    }
+                    if missingGoal {
+                        setupItem("Enter a monthly goal in hours or revenue", target: .hours)
+                    }
+                    if !missingRate && !missingGoal {
+                        setupItem("Press Save in Monthly Goal to apply", target: .hours)
+                    }
                 }
-                if missingGoal {
-                    setupItem("Enter a monthly goal in hours or revenue", target: .hours)
-                }
-                if !missingRate && !missingGoal {
-                    setupItem("Press Save in Monthly Goal to apply", target: .hours)
-                }
+                .padding(.leading, 24)
             }
             .padding(.vertical, 2)
         }
@@ -382,11 +449,12 @@ private struct ClientDetailView: View {
         } label: {
             HStack(spacing: 5) {
                 Image(systemName: "arrow.forward.circle")
+                    .foregroundStyle(.secondary)
                 Text(text)
                     .underline()
+                    .foregroundStyle(.primary)
             }
             .font(.callout)
-            .foregroundStyle(.orange)
         }
         .buttonStyle(.plain)
     }

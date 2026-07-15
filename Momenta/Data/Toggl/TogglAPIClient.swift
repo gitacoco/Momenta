@@ -71,6 +71,10 @@ struct TogglAPIClient: Sendable {
         try await get("workspaces")
     }
 
+    func organizations() async throws -> [TogglOrganization] {
+        try await get("me/organizations")
+    }
+
     func clients(workspaceID: Int) async throws -> [TogglClientDTO] {
         try await get("workspaces/\(workspaceID)/clients")
     }

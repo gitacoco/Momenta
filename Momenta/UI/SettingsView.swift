@@ -1,8 +1,8 @@
 import SwiftUI
 
 /// Single Settings window (Cmd+,) with an always-visible Account / Clients /
-/// Display sidebar. Plain fixed layout — settings never collapse the sidebar,
-/// so no NavigationSplitView toolbar or toggle button.
+/// Display sidebar. Account and Display use two columns; Clients promotes the
+/// same primary sidebar into one native three-column NavigationSplitView.
 struct SettingsView: View {
     private enum Section: String, CaseIterable, Identifiable {
         case account
@@ -30,46 +30,141 @@ struct SettingsView: View {
 
     @Environment(AppState.self) private var appState
     @State private var selection: Section? = .account
+    @State private var backHistory: [Section] = []
+    @State private var forwardHistory: [Section] = []
+    @State private var isApplyingHistory = false
+    @State private var selectedClientID: Int?
 
     private var currentSection: Section {
         selection ?? .account
     }
 
     var body: some View {
-        // NavigationSplitView so the window gets the native (Liquid Glass)
-        // toolbar treatment: the page title lives in the real heading area
-        // and content scrolls beneath it.
-        NavigationSplitView {
-            List(Section.allCases, selection: $selection) { section in
-                Label(section.label, systemImage: section.icon)
-                    .tag(section)
+        Group {
+            if currentSection == .clients {
+                clientsNavigation
+            } else {
+                standardNavigation
             }
-            .navigationSplitViewColumnWidth(180)
-            // Settings sidebars never collapse.
-            .toolbar(removing: .sidebarToggle)
-        } detail: {
-            Group {
-                switch currentSection {
-                case .account:
-                    AccountSettingsView()
-                case .clients:
-                    ClientsSettingsView()
-                case .display:
-                    displaySettings
-                }
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .frame(minWidth: 720, maxWidth: .infinity, minHeight: 480, maxHeight: .infinity)
-        .navigationTitle(currentSection.label)
+        // Keep one stable vertical contract while switching between the
+        // two- and three-column settings layouts. The split view paints into
+        // the window's bottom safe area so its sidebar backgrounds reach the
+        // rounded window edge instead of exposing the white window backing.
+        .frame(minHeight: 560, maxHeight: .infinity, alignment: .topLeading)
+        .ignoresSafeArea(.container, edges: .bottom)
         .onAppear(perform: consumeDestination)
+        .onChange(of: selection, recordNavigation)
         .onChange(of: appState.pendingSettingsDestination) {
             consumeDestination()
         }
     }
 
+    /// Account and Display are native two-column settings pages.
+    private var standardNavigation: some View {
+        NavigationSplitView(columnVisibility: .constant(.all)) {
+            primarySidebar
+        } detail: {
+            Group {
+                switch currentSection {
+                case .account:
+                    AccountSettingsView()
+                        .navigationTitle(Section.account.label)
+                case .display:
+                    displaySettings
+                        .navigationTitle(Section.display.label)
+                case .clients:
+                    EmptyView()
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .toolbar { navigatorToolbar }
+        }
+        .frame(minWidth: 720, maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    /// Clients is one window-level three-column split. Nesting another split
+    /// inside the two-column detail makes toolbar titles and width proposals
+    /// compete, which can push both outer columns beyond the window bounds.
+    private var clientsNavigation: some View {
+        NavigationSplitView(columnVisibility: .constant(.all)) {
+            primarySidebar
+        } content: {
+            ClientsListColumn(selectedClientID: $selectedClientID)
+                .navigationTitle(Section.clients.label)
+                .navigationSplitViewColumnWidth(min: 220, ideal: 230, max: 320)
+                .toolbar { navigatorToolbar }
+        } detail: {
+            ClientDetailColumn(selectedClientID: selectedClientID)
+                .navigationSplitViewColumnWidth(min: 480, ideal: 680, max: .infinity)
+                .overlay(alignment: .topLeading) {
+                    detailTitlebar(title: selectedClientName)
+                }
+        }
+        .frame(minWidth: 900, maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var primarySidebar: some View {
+        List(Section.allCases, selection: $selection) { section in
+            Label(section.label, systemImage: section.icon)
+                .tag(section)
+        }
+        .listStyle(.sidebar)
+        .scrollDisabled(true)
+        .frame(minWidth: 180, idealWidth: 180, maxWidth: 180)
+        .navigationSplitViewColumnWidth(min: 180, ideal: 180, max: 180)
+        // Settings sidebars never collapse or expose a sidebar toggle.
+        .toolbar(removing: .sidebarToggle)
+    }
+
+    private var selectedClientName: String? {
+        selectedClientID.flatMap { appState.config.client(id: $0)?.displayName }
+    }
+
+    private func detailTitlebar(title: String?) -> some View {
+        ZStack(alignment: .leading) {
+            Rectangle()
+                .fill(Color(nsColor: .separatorColor))
+                .frame(width: 1)
+                .accessibilityHidden(true)
+
+            if let title {
+                Text(title)
+                    .font(.title2.weight(.semibold))
+                    .lineLimit(1)
+                    .padding(.leading, 24)
+                    .accessibilityAddTraits(.isHeader)
+            }
+        }
+        .frame(height: 52)
+        .offset(x: -1, y: -52)
+        .allowsHitTesting(false)
+    }
+
+    @ToolbarContentBuilder
+    private var navigatorToolbar: some ToolbarContent {
+        ToolbarItem(placement: .navigation) {
+            ControlGroup {
+                Button(action: navigateBack) {
+                    Label("Back", systemImage: "chevron.left")
+                }
+                .disabled(backHistory.isEmpty)
+                .keyboardShortcut("[", modifiers: .command)
+
+                Button(action: navigateForward) {
+                    Label("Forward", systemImage: "chevron.right")
+                }
+                .disabled(forwardHistory.isEmpty)
+                .keyboardShortcut("]", modifiers: .command)
+            }
+            .controlGroupStyle(.navigation)
+            .controlSize(.large)
+            .labelStyle(.iconOnly)
+        }
+    }
+
     /// Routes deep links from the popover. The clients destination is left
-    /// pending so ClientsSettingsView can also pick up the client selection.
+    /// pending so ClientsListColumn can also pick up the client selection.
     private func consumeDestination() {
         switch appState.pendingSettingsDestination {
         case .account:
@@ -80,6 +175,34 @@ struct SettingsView: View {
         case nil:
             break
         }
+    }
+
+    /// Mirrors System Settings' back/forward navigator while keeping the
+    /// settings sidebar permanently visible.
+    private func recordNavigation(_ oldSelection: Section?, _ newSelection: Section?) {
+        guard let oldSelection, let newSelection, oldSelection != newSelection else { return }
+
+        if isApplyingHistory {
+            isApplyingHistory = false
+            return
+        }
+
+        backHistory.append(oldSelection)
+        forwardHistory.removeAll()
+    }
+
+    private func navigateBack() {
+        guard let destination = backHistory.popLast() else { return }
+        forwardHistory.append(currentSection)
+        isApplyingHistory = true
+        selection = destination
+    }
+
+    private func navigateForward() {
+        guard let destination = forwardHistory.popLast() else { return }
+        backHistory.append(currentSection)
+        isApplyingHistory = true
+        selection = destination
     }
 
     private var displaySettings: some View {

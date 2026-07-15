@@ -28,6 +28,9 @@ struct AccountSettingsView: View {
             }
         }
         .formStyle(.grouped)
+        .task {
+            await account.refreshMetadataIfNeeded()
+        }
         .confirmationDialog(
             "Disconnect from Toggl?",
             isPresented: $showDisconnectDialog
@@ -82,11 +85,30 @@ struct AccountSettingsView: View {
     private func connectedSection(_ snapshot: AccountSnapshot) -> some View {
         Section("Connection") {
             LabeledContent("Status") {
-                Label("Connected", systemImage: "checkmark.circle.fill")
-                    .foregroundStyle(.green)
+                HStack(spacing: 12) {
+                    HStack(spacing: 7) {
+                        Circle()
+                            .fill(.green)
+                            .frame(width: 8, height: 8)
+                            .accessibilityHidden(true)
+                        Text("Connected")
+                            .foregroundStyle(.secondary)
+                    }
+                    Button("Disconnect…", role: .destructive) {
+                        showDisconnectDialog = true
+                    }
+                }
             }
             LabeledContent("Name", value: snapshot.fullname)
             LabeledContent("Email", value: snapshot.email)
+            LabeledContent("Plan") {
+                if let organization = snapshot.defaultOrganization {
+                    Text(organization.displayPlanName)
+                } else {
+                    Text("Unavailable")
+                        .foregroundStyle(.secondary)
+                }
+            }
             LabeledContent("Connected", value: snapshot.connectedAt.formatted(date: .abbreviated, time: .shortened))
             LabeledContent("Last sync") {
                 if let lastSync = account.lastSyncAt {
@@ -97,19 +119,11 @@ struct AccountSettingsView: View {
                 }
             }
         }
-        Section("Workspaces") {
-            if snapshot.workspaces.isEmpty {
-                Text("No workspaces found")
-                    .foregroundStyle(.secondary)
-            } else {
-                ForEach(snapshot.workspaces) { workspace in
+        if !snapshot.visibleWorkspaces.isEmpty {
+            Section("Workspaces") {
+                ForEach(snapshot.visibleWorkspaces) { workspace in
                     Label(workspace.name, systemImage: "rectangle.3.group")
                 }
-            }
-        }
-        Section {
-            Button("Disconnect…", role: .destructive) {
-                showDisconnectDialog = true
             }
         }
     }

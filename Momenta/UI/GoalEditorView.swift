@@ -22,6 +22,8 @@ struct GoalEditorSection: View {
     @State private var showRetroDialog = false
     @State private var savedFeedback = false
 
+    private let converterFieldWidth: CGFloat = 140
+
     private var month: YearMonth {
         appState.currentMonth
     }
@@ -36,26 +38,52 @@ struct GoalEditorSection: View {
 
     var body: some View {
         Section {
-            HStack(alignment: .bottom) {
-                converterField(
-                    "Hours",
-                    value: hoursBinding,
-                    focusTag: .hours,
-                    width: 120,
-                    alignment: .leading
-                )
-                Spacer()
-                Image(systemName: "arrow.left.arrow.right")
-                    .foregroundStyle(.secondary)
-                    .padding(.bottom, 5)
-                Spacer()
-                converterField(
-                    "Revenue (\(client.currency))",
-                    value: revenueBinding,
-                    focusTag: .revenue,
-                    width: 140,
-                    alignment: .trailing
-                )
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .bottom, spacing: 12) {
+                    converterField(
+                        "Hours",
+                        value: hoursBinding,
+                        focusTag: .hours,
+                        width: converterFieldWidth,
+                        alignment: .leading,
+                        textAlignment: .leading
+                    )
+                    Spacer(minLength: 0)
+                    Image(systemName: "arrow.left.arrow.right")
+                        .foregroundStyle(.secondary)
+                        .padding(.bottom, 5)
+                    Spacer(minLength: 0)
+                    converterField(
+                        "Revenue (\(client.currency))",
+                        value: revenueBinding,
+                        focusTag: .revenue,
+                        width: converterFieldWidth,
+                        alignment: .trailing,
+                        textAlignment: .trailing
+                    )
+                }
+
+                VStack(alignment: .leading, spacing: 10) {
+                    converterField(
+                        "Hours",
+                        value: hoursBinding,
+                        focusTag: .hours,
+                        width: converterFieldWidth,
+                        alignment: .leading,
+                        textAlignment: .leading
+                    )
+                    Image(systemName: "arrow.up.arrow.down")
+                        .foregroundStyle(.secondary)
+                    converterField(
+                        "Revenue (\(client.currency))",
+                        value: revenueBinding,
+                        focusTag: .revenue,
+                        width: converterFieldWidth,
+                        alignment: .leading,
+                        textAlignment: .leading
+                    )
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
             .padding(.vertical, 2)
         } header: {
@@ -66,6 +94,7 @@ struct GoalEditorSection: View {
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                         .textCase(nil)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 Spacer()
                 if savedFeedback {
@@ -117,16 +146,17 @@ struct GoalEditorSection: View {
         value: Binding<Decimal?>,
         focusTag: ClientField,
         width: CGFloat,
-        alignment: HorizontalAlignment
+        alignment: HorizontalAlignment,
+        textAlignment: TextAlignment
     ) -> some View {
         VStack(alignment: alignment, spacing: 4) {
             Text(title)
                 .font(.caption)
                 .foregroundStyle(.secondary)
             TextField(title, value: value, format: .number.precision(.fractionLength(0...2)))
-                .textFieldStyle(.roundedBorder)
-                .multilineTextAlignment(.trailing)
-                .frame(width: width)
+                .textFieldStyle(.plain)
+                .multilineTextAlignment(textAlignment)
+                .frame(minWidth: min(width, 88), idealWidth: width, maxWidth: width)
                 .focused(focus, equals: focusTag)
                 .labelsHidden()
                 .onSubmit(commitIfDirty)
@@ -187,6 +217,8 @@ struct GoalHistoryView: View {
                                 Text(historyLine(goal))
                                     .font(.callout.monospacedDigit())
                                     .foregroundStyle(.secondary)
+                                    .multilineTextAlignment(.trailing)
+                                    .fixedSize(horizontal: false, vertical: true)
                             }
                         }
                     }

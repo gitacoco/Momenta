@@ -86,15 +86,25 @@ struct TogglAPIClientTests {
     }
 
     @Test func parsesWorkspacesAndClients() async throws {
-        let workspacesJSON = #"[{"id":101,"name":"Freelance"},{"id":102,"name":"Side Projects"}]"#
+        let workspacesJSON = #"[{"id":101,"name":"Freelance","organization_id":10},{"id":102,"name":"Side Projects","organization_id":10}]"#
         let workspaces = try await client(StubTransport(data: Data(workspacesJSON.utf8))).workspaces()
         #expect(workspaces.map(\.name) == ["Freelance", "Side Projects"])
+        #expect(workspaces.map(\.organizationId) == [10, 10])
 
         let clientsJSON = #"[{"id":7,"wid":101,"name":"Acme Corp","archived":false},{"id":8,"wid":101,"name":"Old Co","archived":true}]"#
         let clients = try await client(StubTransport(data: Data(clientsJSON.utf8))).clients(workspaceID: 101)
         #expect(clients.count == 2)
         #expect(clients[0].name == "Acme Corp")
         #expect(clients[1].archived == true)
+    }
+
+    @Test func parsesOrganizationPlanMetadata() async throws {
+        let json = #"[{"id":10,"name":"Studio","is_multi_workspace_enabled":true,"subscription":{"plan_name":"Enterprise","enterprise":true}}]"#
+        let organizations = try await client(StubTransport(data: Data(json.utf8))).organizations()
+
+        #expect(organizations.count == 1)
+        #expect(organizations[0].displayPlanName == "Enterprise")
+        #expect(organizations[0].supportsMultipleWorkspaces)
     }
 
     @Test func parsesProjectsWithClientLink() async throws {
