@@ -5,6 +5,7 @@ import Observation
 @Observable
 final class AppState {
     private let provider: any DataProvider
+    let account: AccountManager
 
     var clients: [ClientConfig] = []
     var snapshots: [YearMonth: TimeEntrySnapshot] = [:]
@@ -16,8 +17,9 @@ final class AppState {
     /// Popover chart unit toggle. View state only, resets with the process.
     var displayUnit: DisplayUnit = .revenue
 
-    init(provider: any DataProvider) {
+    init(provider: any DataProvider, account: AccountManager = AccountManager()) {
         self.provider = provider
+        self.account = account
         self.selectedMonth = YearMonth(containing: Date(), timeZone: .current)
         Task {
             await self.refresh()
@@ -49,9 +51,15 @@ final class AppState {
                 snapshots[selectedMonth] = try await provider.loadSnapshot(for: selectedMonth, timeZone: timeZone, now: now)
             }
             lastError = nil
+            account.markSynced(at: now)
         } catch {
             lastError = error.localizedDescription
         }
+    }
+
+    /// Drops all cached month data. Offered when disconnecting the account.
+    func clearCache() {
+        snapshots.removeAll()
     }
 
     func select(month: YearMonth) {

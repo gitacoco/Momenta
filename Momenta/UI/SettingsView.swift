@@ -29,7 +29,7 @@ struct SettingsView: View {
     }
 
     @Environment(AppState.self) private var appState
-    @State private var selection: Section = .display
+    @State private var selection: Section = .account
 
     var body: some View {
         NavigationSplitView {
@@ -41,11 +41,7 @@ struct SettingsView: View {
         } detail: {
             switch selection {
             case .account:
-                placeholder(
-                    icon: "person.crop.circle",
-                    title: "Toggl Account",
-                    message: "Token entry, validation, and connection status arrive with BON-12."
-                )
+                AccountSettingsView()
             case .clients:
                 placeholder(
                     icon: "person.2",
