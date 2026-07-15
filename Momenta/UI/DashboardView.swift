@@ -50,29 +50,16 @@ struct DashboardView: View {
 
             Spacer()
 
-            Picker("Unit", selection: $appState.displayUnit) {
-                ForEach(DisplayUnit.allCases) { unit in
-                    Text(unit.label).tag(unit)
-                }
+            Text("Display goals in")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+            Picker("Display goals in", selection: $appState.displayUnit) {
+                Image(systemName: "dollarsign").tag(DisplayUnit.revenue)
+                Image(systemName: "clock").tag(DisplayUnit.hours)
             }
             .pickerStyle(.segmented)
             .labelsHidden()
             .fixedSize()
-
-            Button {
-                // Manual refresh bypasses the throttle and refetches the
-                // selected historical month too.
-                Task { await appState.refresh(force: true) }
-            } label: {
-                Image(systemName: "arrow.clockwise")
-            }
-            .buttonStyle(.borderless)
-            .disabled(appState.isLoading)
-
-            SettingsLink {
-                Image(systemName: "gearshape")
-            }
-            .buttonStyle(.borderless)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
@@ -208,6 +195,23 @@ struct DashboardView: View {
                 statusLine
             }
             Spacer()
+            Button {
+                // Manual refresh bypasses the throttle and refetches the
+                // selected historical month too.
+                Task { await appState.refresh(force: true) }
+            } label: {
+                Image(systemName: "arrow.clockwise")
+            }
+            .buttonStyle(.borderless)
+            .disabled(appState.isLoading)
+
+            Button {
+                openSettings()
+            } label: {
+                Image(systemName: "gearshape")
+            }
+            .buttonStyle(.borderless)
+
             Button("Quit") {
                 NSApplication.shared.terminate(nil)
             }
