@@ -1,5 +1,13 @@
 import SwiftUI
 
+private struct DetailColumnBoundsPreferenceKey: PreferenceKey {
+    static let defaultValue: Anchor<CGRect>? = nil
+
+    static func reduce(value: inout Anchor<CGRect>?, nextValue: () -> Anchor<CGRect>?) {
+        value = nextValue() ?? value
+    }
+}
+
 /// Single Settings window (Cmd+,) with an always-visible Account / Clients /
 /// Display sidebar. Account and Display use two columns; Clients promotes the
 /// same primary sidebar into one native three-column NavigationSplitView.
@@ -34,6 +42,8 @@ struct SettingsView: View {
     @State private var forwardHistory: [Section] = []
     @State private var isApplyingHistory = false
     @State private var selectedClientID: Int?
+    @State private var standardColumnVisibility: NavigationSplitViewVisibility = .all
+    @State private var clientsColumnVisibility: NavigationSplitViewVisibility = .all
 
     private var currentSection: Section {
         selection ?? .account
@@ -62,7 +72,7 @@ struct SettingsView: View {
 
     /// Account and Display are native two-column settings pages.
     private var standardNavigation: some View {
-        NavigationSplitView(columnVisibility: .constant(.all)) {
+        NavigationSplitView(columnVisibility: $standardColumnVisibility) {
             primarySidebar
         } detail: {
             Group {
@@ -81,14 +91,22 @@ struct SettingsView: View {
             .toolbar { navigatorToolbar }
         }
         .frame(minWidth: 720, maxWidth: .infinity, maxHeight: .infinity)
-        .blocksPrimarySidebarDivider()
+        .boundedPrimarySidebarResizeHandle(
+            minimumWidth: 180,
+            maximumWidth: 240
+        )
+        .onChange(of: standardColumnVisibility) { _, newVisibility in
+            if newVisibility != .all {
+                standardColumnVisibility = .all
+            }
+        }
     }
 
     /// Clients is one window-level three-column split. Nesting another split
     /// inside the two-column detail makes toolbar titles and width proposals
     /// compete, which can push both outer columns beyond the window bounds.
     private var clientsNavigation: some View {
-        NavigationSplitView(columnVisibility: .constant(.all)) {
+        NavigationSplitView(columnVisibility: $clientsColumnVisibility) {
             primarySidebar
         } content: {
             ClientsListColumn(selectedClientID: $selectedClientID)
@@ -98,12 +116,33 @@ struct SettingsView: View {
         } detail: {
             ClientDetailColumn(selectedClientID: selectedClientID)
                 .navigationSplitViewColumnWidth(min: 480, ideal: 680, max: .infinity)
-                .marksDetailColumnBounds()
+                .anchorPreference(key: DetailColumnBoundsPreferenceKey.self, value: .bounds) { $0 }
         }
         .frame(minWidth: 900, maxWidth: .infinity, maxHeight: .infinity)
-        .blocksPrimarySidebarDivider()
-        .addsDetailTitlebar {
-            detailTitlebar(title: selectedClientName)
+        .overlayPreferenceValue(DetailColumnBoundsPreferenceKey.self) { anchor in
+            GeometryReader { proxy in
+                if let anchor, let title = selectedClientName {
+                    let detailBounds = proxy[anchor]
+
+                    Text(title)
+                        .font(.title2.weight(.semibold))
+                        .lineLimit(1)
+                        .padding(.leading, 24)
+                        .frame(width: detailBounds.width, height: 52, alignment: .leading)
+                        .position(x: detailBounds.midX, y: detailBounds.minY - 26)
+                        .accessibilityAddTraits(.isHeader)
+                }
+            }
+            .allowsHitTesting(false)
+        }
+        .boundedPrimarySidebarResizeHandle(
+            minimumWidth: 180,
+            maximumWidth: 240
+        )
+        .onChange(of: clientsColumnVisibility) { _, newVisibility in
+            if newVisibility != .all {
+                clientsColumnVisibility = .all
+            }
         }
     }
 
@@ -114,34 +153,15 @@ struct SettingsView: View {
         }
         .listStyle(.sidebar)
         .scrollDisabled(true)
-        .frame(minWidth: 180, idealWidth: 180, maxWidth: 180)
-        .navigationSplitViewColumnWidth(min: 180, ideal: 180, max: 180)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .navigationSplitViewColumnWidth(min: 180, ideal: 200, max: 240)
+        .marksPrimarySidebarBounds()
         // Settings sidebars never collapse or expose a sidebar toggle.
         .toolbar(removing: .sidebarToggle)
-        .marksPrimarySidebarBounds()
     }
 
     private var selectedClientName: String? {
         selectedClientID.flatMap { appState.config.client(id: $0)?.displayName }
-    }
-
-    private func detailTitlebar(title: String?) -> some View {
-        ZStack(alignment: .leading) {
-            Rectangle()
-                .fill(Color(nsColor: .separatorColor))
-                .frame(width: 1)
-                .accessibilityHidden(true)
-
-            if let title {
-                Text(title)
-                    .font(.title2.weight(.semibold))
-                    .lineLimit(1)
-                    .padding(.leading, 24)
-                    .accessibilityAddTraits(.isHeader)
-            }
-        }
-        .frame(height: 52)
-        .allowsHitTesting(false)
     }
 
     @ToolbarContentBuilder
