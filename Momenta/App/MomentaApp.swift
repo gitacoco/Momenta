@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 @main
@@ -12,11 +13,36 @@ struct MomentaApp: App {
         Window("Momenta Settings", id: "settings") {
             SettingsView()
                 .environment(AppState.shared)
+                .background(SettingsWindowChrome())
         }
         .windowResizability(.contentMinSize)
         .windowToolbarStyle(.automatic)
         .defaultLaunchBehavior(.suppressed)
         .handlesExternalEvents(matching: ["settings"])
+    }
+}
+
+/// The automatic macOS 26 toolbar style still chooses a hard titlebar
+/// separator for some scroll-edge states. An explicit window preference keeps
+/// the floating toolbar treatment consistent across every settings page.
+private struct SettingsWindowChrome: NSViewRepresentable {
+    func makeNSView(context: Context) -> WindowChromeView {
+        WindowChromeView()
+    }
+
+    func updateNSView(_ nsView: WindowChromeView, context: Context) {
+        nsView.applyWindowChrome()
+    }
+
+    final class WindowChromeView: NSView {
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            applyWindowChrome()
+        }
+
+        func applyWindowChrome() {
+            window?.titlebarSeparatorStyle = .none
+        }
     }
 }
 

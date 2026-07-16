@@ -1,6 +1,18 @@
 import AppKit
 import SwiftUI
 
+private final class LocalEventMonitorToken: @unchecked Sendable {
+    let rawValue: Any
+
+    init(_ rawValue: Any) {
+        self.rawValue = rawValue
+    }
+
+    deinit {
+        NSEvent.removeMonitor(rawValue)
+    }
+}
+
 private struct PrimarySidebarBoundsPreferenceKey: PreferenceKey {
     static let defaultValue: Anchor<CGRect>? = nil
 
@@ -88,6 +100,7 @@ private struct PrimarySidebarResizeHandle: NSViewRepresentable {
         nsView.renderedPosition = renderedPosition
         nsView.minimumWidth = minimumWidth
         nsView.maximumWidth = maximumWidth
+        nsView.updateEventMonitor()
         nsView.scheduleClamp()
     }
 
@@ -99,6 +112,8 @@ private struct PrimarySidebarResizeHandle: NSViewRepresentable {
         private var dragStartX: CGFloat?
         private var dragStartPosition: CGFloat?
         private var clampGeneration = 0
+        private var eventMonitor: LocalEventMonitorToken?
+        private var isInterceptingDividerDrag = false
 
         override var isOpaque: Bool { false }
 
@@ -109,8 +124,16 @@ private struct PrimarySidebarResizeHandle: NSViewRepresentable {
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
             if window != nil {
+                updateEventMonitor()
                 scheduleClamp()
             }
+        }
+
+        override func viewWillMove(toWindow newWindow: NSWindow?) {
+            if newWindow !== window {
+                removeEventMonitor()
+            }
+            super.viewWillMove(toWindow: newWindow)
         }
 
         override func hitTest(_ point: NSPoint) -> NSView? {
@@ -137,6 +160,71 @@ private struct PrimarySidebarResizeHandle: NSViewRepresentable {
             super.resetCursorRects()
             let cursor: NSCursor = minimumWidth == maximumWidth ? .arrow : .resizeLeftRight
             addCursorRect(bounds, cursor: cursor)
+        }
+
+        /// The titlebar portion of a NavigationSplitView divider lives in an
+        /// AppKit sibling above SwiftUI's overlay. A window-scoped monitor is
+        /// therefore required to prevent that native tracking loop from ever
+        /// starting when this column is locked.
+        func updateEventMonitor() {
+            let isLocked = abs(maximumWidth - minimumWidth) < 0.5
+            guard isLocked, window != nil else {
+                removeEventMonitor()
+                return
+            }
+            guard eventMonitor == nil else { return }
+
+            let monitor = NSEvent.addLocalMonitorForEvents(
+                matching: [.leftMouseDown, .leftMouseDragged, .leftMouseUp, .cursorUpdate]
+            ) { [weak self] event in
+                self?.handleMonitoredEvent(event) ?? event
+            }
+            guard let monitor else { return }
+            eventMonitor = LocalEventMonitorToken(monitor)
+        }
+
+        private func removeEventMonitor() {
+            eventMonitor = nil
+            isInterceptingDividerDrag = false
+        }
+
+        private func handleMonitoredEvent(_ event: NSEvent) -> NSEvent? {
+            if isInterceptingDividerDrag {
+                switch event.type {
+                case .leftMouseDragged:
+                    NSCursor.arrow.set()
+                    return nil
+                case .leftMouseUp:
+                    isInterceptingDividerDrag = false
+                    NSCursor.arrow.set()
+                    return nil
+                default:
+                    break
+                }
+            }
+
+            guard isAtDivider(event) else { return event }
+
+            switch event.type {
+            case .leftMouseDown:
+                isInterceptingDividerDrag = true
+                NSCursor.arrow.set()
+                return nil
+            case .cursorUpdate:
+                NSCursor.arrow.set()
+                return nil
+            default:
+                return event
+            }
+        }
+
+        private func isAtDivider(_ event: NSEvent) -> Bool {
+            guard let window, event.window === window else { return false }
+            let dividerX = convert(
+                NSPoint(x: bounds.midX, y: bounds.midY),
+                to: nil
+            ).x
+            return abs(event.locationInWindow.x - dividerX) <= 8
         }
 
         func scheduleClamp() {
