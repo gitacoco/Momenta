@@ -219,20 +219,23 @@ struct ClientDetailColumn: View {
         Set(appState.config.clients.map(\.workspaceID)).count > 1
     }
 
-    @ViewBuilder
     var body: some View {
-        if let id = selectedClientID, let client = appState.config.client(id: id) {
-            ClientDetailView(client: client, showsWorkspace: isMultiWorkspace)
-                .id(id) // reset editor state when switching clients
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        } else {
-            ContentUnavailableView {
-                Label("Select a Client", systemImage: "person.crop.rectangle")
-            } description: {
-                Text("Pick a client to configure its profile, rate, and goal.")
+        ZStack {
+            if let id = selectedClientID, let client = appState.config.client(id: id) {
+                ClientDetailView(client: client, showsWorkspace: isMultiWorkspace)
+                    .id(id) // reset editor state when switching clients
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            } else {
+                ContentUnavailableView {
+                    Label("Select a Client", systemImage: "person.crop.rectangle")
+                } description: {
+                    Text("Pick a client to configure its profile, rate, and goal.")
+                }
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
         }
+        // Keep one stable, full-size detail root while switching between the
+        // scrolling Form and the centered no-selection state.
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
     }
 }
 

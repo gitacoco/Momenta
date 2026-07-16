@@ -23,22 +23,55 @@ extension View {
         minimumWidth: CGFloat,
         maximumWidth: CGFloat
     ) -> some View {
-        overlayPreferenceValue(PrimarySidebarBoundsPreferenceKey.self) { anchor in
-            GeometryReader { proxy in
-                if let anchor {
-                    let sidebarBounds = proxy[anchor]
+        modifier(
+            BoundedPrimarySidebarResizeModifier(
+                minimumWidth: minimumWidth,
+                maximumWidth: maximumWidth
+            )
+        )
+    }
+}
 
+private struct BoundedPrimarySidebarResizeModifier: ViewModifier {
+    let minimumWidth: CGFloat
+    let maximumWidth: CGFloat
+    @State private var renderedPosition: CGFloat?
+
+    func body(content: Content) -> some View {
+        content
+            // Resolve the anchor in a full-size layer that never participates
+            // in hit testing. Its only output is the divider's x position.
+            .overlayPreferenceValue(PrimarySidebarBoundsPreferenceKey.self) { anchor in
+                GeometryReader { proxy in
+                    if let anchor {
+                        let position = proxy[anchor].maxX
+
+                        Color.clear
+                            .onAppear {
+                                renderedPosition = position
+                            }
+                            .onChange(of: position) { _, newPosition in
+                                renderedPosition = newPosition
+                            }
+                    }
+                }
+                .allowsHitTesting(false)
+            }
+            // Only this narrow strip can receive pointer events. The rest of
+            // the split view remains available to forms, lists, and scrolling.
+            .overlay(alignment: .topLeading) {
+                if let renderedPosition {
                     PrimarySidebarResizeHandle(
-                        renderedPosition: sidebarBounds.maxX,
+                        renderedPosition: renderedPosition,
                         minimumWidth: minimumWidth,
                         maximumWidth: maximumWidth
                     )
-                    .frame(width: 12, height: proxy.size.height)
-                    .position(x: sidebarBounds.maxX, y: proxy.size.height / 2)
+                    .frame(width: 12)
+                    .frame(maxHeight: .infinity)
+                    .offset(x: renderedPosition - 6)
                     .accessibilityHidden(true)
                 }
             }
-        }
     }
 }
 
