@@ -1,10 +1,10 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// The middle column of Settings → Clients: the full Toggl client list (no
-/// manual add), with enable switches and drag-to-reorder. SettingsView owns
-/// the single window-level NavigationSplitView that contains this column.
-struct ClientsListColumn: View {
+/// A page-local selector for Settings → Clients. It keeps the full Toggl
+/// client list, enable switches, and drag-to-reorder behavior without acting
+/// as another navigation column.
+struct ClientSelectorView: View {
     @Environment(AppState.self) private var appState
     @Binding var selectedClientID: Int?
 
@@ -60,7 +60,7 @@ struct ClientsListColumn: View {
         }
     }
 
-    // MARK: Client list (secondary sidebar)
+    // MARK: Client selector
 
     private var activeClients: [ClientConfig] {
         appState.config.clients.filter { !$0.isArchivedInToggl }
@@ -83,36 +83,34 @@ struct ClientsListColumn: View {
     }
 
     private var listPane: some View {
-        List(selection: $selectedClientID) {
-            if isMultiWorkspace {
-                ForEach(workspaceNames, id: \.self) { workspace in
-                    Section(workspace) {
-                        clientRows(activeClients.filter { $0.workspaceName == workspace })
+        VStack(spacing: 0) {
+            List(selection: $selectedClientID) {
+                if isMultiWorkspace {
+                    ForEach(workspaceNames, id: \.self) { workspace in
+                        Section(workspace) {
+                            clientRows(activeClients.filter { $0.workspaceName == workspace })
+                        }
+                    }
+                } else {
+                    clientRows(activeClients)
+                }
+                if !archivedClients.isEmpty {
+                    Section("Archived") {
+                        ForEach(archivedClients) { client in
+                            archivedRow(client)
+                                .tag(client.id)
+                        }
                     }
                 }
-            } else {
-                clientRows(activeClients)
             }
-            if !archivedClients.isEmpty {
-                Section("Archived") {
-                    ForEach(archivedClients) { client in
-                        archivedRow(client)
-                            .tag(client.id)
-                    }
-                }
-            }
+            .listStyle(.inset)
+            .scrollContentBackground(.hidden)
+
+            Divider()
+            listFooter
+                .fixedSize(horizontal: false, vertical: true)
         }
-        .listStyle(.sidebar)
-        .scrollContentBackground(.hidden)
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            VStack(spacing: 0) {
-                Divider()
-                listFooter
-            }
-            .fixedSize(horizontal: false, vertical: true)
-            .background(.background.secondary)
-        }
-        .background(.background.secondary)
+        .background(Color(nsColor: .controlBackgroundColor))
     }
 
     /// Rows for one displayed group, draggable to reorder within the group.
@@ -126,7 +124,7 @@ struct ClientsListColumn: View {
         }
     }
 
-    /// Footer shares the sidebar's base background — the divider alone
+    /// Footer shares the selector card's base background — the divider alone
     /// separates it. Errors wrap fully instead of truncating.
     private var listFooter: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -208,9 +206,9 @@ struct ClientsListColumn: View {
     }
 }
 
-/// The right-hand Clients column. Its no-selection state fills the complete
-/// column so ContentUnavailableView receives the correct centered proposal;
-/// the selected client's Form remains top-aligned by its own layout.
+/// The right-hand side of the Clients page. Its no-selection state fills the
+/// complete editor area; a selected client keeps a normal in-content heading
+/// above the independently scrolling Form.
 struct ClientDetailColumn: View {
     @Environment(AppState.self) private var appState
     let selectedClientID: Int?
@@ -222,9 +220,19 @@ struct ClientDetailColumn: View {
     var body: some View {
         ZStack {
             if let id = selectedClientID, let client = appState.config.client(id: id) {
-                ClientDetailView(client: client, showsWorkspace: isMultiWorkspace)
-                    .id(id) // reset editor state when switching clients
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                VStack(alignment: .leading, spacing: 0) {
+                    Text(client.displayName)
+                        .font(.title2.weight(.semibold))
+                        .lineLimit(1)
+                        .padding(.horizontal, 24)
+                        .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
+                        .accessibilityAddTraits(.isHeader)
+
+                    ClientDetailView(client: client, showsWorkspace: isMultiWorkspace)
+                        .id(id) // reset editor state when switching clients
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             } else {
                 ContentUnavailableView {
                     Label("Select a Client", systemImage: "person.crop.rectangle")

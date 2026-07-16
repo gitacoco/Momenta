@@ -1,16 +1,8 @@
 import SwiftUI
 
-private struct DetailColumnBoundsPreferenceKey: PreferenceKey {
-    static let defaultValue: Anchor<CGRect>? = nil
-
-    static func reduce(value: inout Anchor<CGRect>?, nextValue: () -> Anchor<CGRect>?) {
-        value = nextValue() ?? value
-    }
-}
-
-/// Single Settings window (Cmd+,) with an always-visible Account / Clients /
-/// Display sidebar. Account and Display use two columns; Clients promotes the
-/// same primary sidebar into one native three-column NavigationSplitView.
+/// Single Settings window (Cmd+,) with one persistent Account / Clients /
+/// Display sidebar. Every destination replaces only the detail page so the
+/// native split view and the user's chosen sidebar width remain stable.
 struct SettingsView: View {
     private enum Section: String, CaseIterable, Identifiable {
         case account
@@ -42,26 +34,35 @@ struct SettingsView: View {
     @State private var forwardHistory: [Section] = []
     @State private var isApplyingHistory = false
     @State private var selectedClientID: Int?
-    @State private var standardColumnVisibility: NavigationSplitViewVisibility = .all
-    @State private var clientsColumnVisibility: NavigationSplitViewVisibility = .all
+    @State private var columnVisibility: NavigationSplitViewVisibility = .all
+
+    private let clientSelectorWidth: CGFloat = 240
 
     private var currentSection: Section {
         selection ?? .account
     }
 
     var body: some View {
-        Group {
-            if currentSection == .clients {
-                clientsNavigation
-            } else {
-                standardNavigation
+        NavigationSplitView(columnVisibility: $columnVisibility) {
+            primarySidebar
+        } detail: {
+            pageHost
+        }
+        // The fixed client selector and client editor both fit at this stable
+        // minimum, so changing destinations never changes the window's own
+        // layout contract.
+        .frame(minWidth: 940, maxWidth: .infinity, minHeight: 560, maxHeight: .infinity)
+        .boundedPrimarySidebarResizeHandle(
+            minimumWidth: 180,
+            maximumWidth: 240
+        )
+        .onChange(of: columnVisibility) { _, newVisibility in
+            if newVisibility != .all {
+                columnVisibility = .all
             }
         }
-        // Keep one stable vertical contract while switching between the
-        // two- and three-column settings layouts. The split view paints into
-        // the window's bottom safe area so its sidebar backgrounds reach the
-        // rounded window edge instead of exposing the white window backing.
-        .frame(minHeight: 560, maxHeight: .infinity, alignment: .topLeading)
+        // Paint the sidebar and selector backgrounds into the rounded bottom
+        // edge instead of exposing the white window backing.
         .ignoresSafeArea(.container, edges: .bottom)
         .onAppear(perform: consumeDestination)
         .onChange(of: selection, recordNavigation)
@@ -70,80 +71,44 @@ struct SettingsView: View {
         }
     }
 
-    /// Account and Display are native two-column settings pages.
-    private var standardNavigation: some View {
-        NavigationSplitView(columnVisibility: $standardColumnVisibility) {
-            primarySidebar
-        } detail: {
-            Group {
-                switch currentSection {
-                case .account:
-                    AccountSettingsView()
-                        .navigationTitle(Section.account.label)
-                case .display:
-                    displaySettings
-                        .navigationTitle(Section.display.label)
-                case .clients:
-                    EmptyView()
-                }
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .toolbar { navigatorToolbar }
-        }
-        .frame(minWidth: 720, maxWidth: .infinity, maxHeight: .infinity)
-        .boundedPrimarySidebarResizeHandle(
-            minimumWidth: 180,
-            maximumWidth: 240
-        )
-        .onChange(of: standardColumnVisibility) { _, newVisibility in
-            if newVisibility != .all {
-                standardColumnVisibility = .all
+    private var pageHost: some View {
+        Group {
+            switch currentSection {
+            case .account:
+                AccountSettingsView()
+            case .clients:
+                clientsWorkspace
+            case .display:
+                displaySettings
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .navigationTitle(currentSection.label)
+        .toolbar { navigatorToolbar }
     }
 
-    /// Clients is one window-level three-column split. Nesting another split
-    /// inside the two-column detail makes toolbar titles and width proposals
-    /// compete, which can push both outer columns beyond the window bounds.
-    private var clientsNavigation: some View {
-        NavigationSplitView(columnVisibility: $clientsColumnVisibility) {
-            primarySidebar
-        } content: {
-            ClientsListColumn(selectedClientID: $selectedClientID)
-                .navigationTitle(Section.clients.label)
-                .navigationSplitViewColumnWidth(min: 220, ideal: 230, max: 320)
-                .toolbar { navigatorToolbar }
-        } detail: {
-            ClientDetailColumn(selectedClientID: selectedClientID)
-                .navigationSplitViewColumnWidth(min: 480, ideal: 680, max: .infinity)
-                .anchorPreference(key: DetailColumnBoundsPreferenceKey.self, value: .bounds) { $0 }
-        }
-        .frame(minWidth: 900, maxWidth: .infinity, maxHeight: .infinity)
-        .overlayPreferenceValue(DetailColumnBoundsPreferenceKey.self) { anchor in
-            GeometryReader { proxy in
-                if let anchor, let title = selectedClientName {
-                    let detailBounds = proxy[anchor]
-
-                    Text(title)
-                        .font(.title2.weight(.semibold))
-                        .lineLimit(1)
-                        .padding(.leading, 24)
-                        .frame(width: detailBounds.width, height: 52, alignment: .leading)
-                        .position(x: detailBounds.midX, y: detailBounds.minY - 26)
-                        .accessibilityAddTraits(.isHeader)
+    /// Clients is a normal settings page. Its fixed-width selector belongs to
+    /// this page rather than becoming another navigation split column, so it
+    /// cannot resize, collapse, or disturb the persistent primary sidebar.
+    private var clientsWorkspace: some View {
+        HStack(spacing: 0) {
+            ClientSelectorView(selectedClientID: $selectedClientID)
+                .frame(width: clientSelectorWidth)
+                .frame(maxHeight: .infinity)
+                .background(Color(nsColor: .controlBackgroundColor))
+                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .stroke(Color(nsColor: .separatorColor).opacity(0.65))
                 }
-            }
-            .allowsHitTesting(false)
+                .padding(.leading, 20)
+                .padding(.vertical, 16)
+                .padding(.trailing, 16)
+
+            ClientDetailColumn(selectedClientID: selectedClientID)
+                .frame(minWidth: 480, maxWidth: .infinity, maxHeight: .infinity)
         }
-        .boundedPrimarySidebarResizeHandle(
-            minimumWidth: 180,
-            maximumWidth: 240
-        )
-        .onChange(of: clientsColumnVisibility) { _, newVisibility in
-            if newVisibility != .all {
-                clientsColumnVisibility = .all
-            }
-        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private var primarySidebar: some View {
@@ -158,10 +123,6 @@ struct SettingsView: View {
         .marksPrimarySidebarBounds()
         // Settings sidebars never collapse or expose a sidebar toggle.
         .toolbar(removing: .sidebarToggle)
-    }
-
-    private var selectedClientName: String? {
-        selectedClientID.flatMap { appState.config.client(id: $0)?.displayName }
     }
 
     @ToolbarContentBuilder
@@ -187,7 +148,7 @@ struct SettingsView: View {
     }
 
     /// Routes deep links from the popover. The clients destination is left
-    /// pending so ClientsListColumn can also pick up the client selection.
+    /// pending so ClientSelectorView can also pick up the client selection.
     private func consumeDestination() {
         switch appState.pendingSettingsDestination {
         case .account:
