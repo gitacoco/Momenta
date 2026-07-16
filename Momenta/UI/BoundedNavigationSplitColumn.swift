@@ -98,6 +98,7 @@ private struct PrimarySidebarResizeHandle: NSViewRepresentable {
 
         private var dragStartX: CGFloat?
         private var dragStartPosition: CGFloat?
+        private var clampGeneration = 0
 
         override var isOpaque: Bool { false }
 
@@ -134,16 +135,19 @@ private struct PrimarySidebarResizeHandle: NSViewRepresentable {
 
         override func resetCursorRects() {
             super.resetCursorRects()
-            addCursorRect(bounds, cursor: .resizeLeftRight)
+            let cursor: NSCursor = minimumWidth == maximumWidth ? .arrow : .resizeLeftRight
+            addCursorRect(bounds, cursor: cursor)
         }
 
-        func scheduleClamp(attemptsRemaining: Int = 40) {
-            DispatchQueue.main.async { [weak self] in
-                guard let self else { return }
-                if !self.clampCurrentPosition(), attemptsRemaining > 0 {
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
-                        self?.scheduleClamp(attemptsRemaining: attemptsRemaining - 1)
-                    }
+        func scheduleClamp() {
+            clampGeneration &+= 1
+            let generation = clampGeneration
+            let restorationCheckDelays: [TimeInterval] = [0, 0.05, 0.15, 0.5, 1, 2, 4]
+
+            for delay in restorationCheckDelays {
+                DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                    guard let self, generation == self.clampGeneration else { return }
+                    _ = self.clampCurrentPosition()
                 }
             }
         }

@@ -36,6 +36,7 @@ struct SettingsView: View {
     @State private var selectedClientID: Int?
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
 
+    private let primarySidebarWidth: CGFloat = 180
     private let clientSelectorWidth: CGFloat = 240
 
     private var currentSection: Section {
@@ -53,8 +54,8 @@ struct SettingsView: View {
         // layout contract.
         .frame(minWidth: 940, maxWidth: .infinity, minHeight: 560, maxHeight: .infinity)
         .boundedPrimarySidebarResizeHandle(
-            minimumWidth: 180,
-            maximumWidth: 240
+            minimumWidth: primarySidebarWidth,
+            maximumWidth: primarySidebarWidth
         )
         .onChange(of: columnVisibility) { _, newVisibility in
             if newVisibility != .all {
@@ -119,7 +120,11 @@ struct SettingsView: View {
         .listStyle(.sidebar)
         .scrollDisabled(true)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .navigationSplitViewColumnWidth(min: 180, ideal: 200, max: 240)
+        .navigationSplitViewColumnWidth(
+            min: primarySidebarWidth,
+            ideal: primarySidebarWidth,
+            max: primarySidebarWidth
+        )
         .marksPrimarySidebarBounds()
         // Settings sidebars never collapse or expose a sidebar toggle.
         .toolbar(removing: .sidebarToggle)
