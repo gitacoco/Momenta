@@ -88,12 +88,17 @@ and in the status item's context menu:
 | Setting | Options | Meaning |
 | --- | --- | --- |
 | Content | Overall, By Client, Overall + Clients | Choose aggregate progress, individual client progress, or both. |
-| Period | Day, Week, Month | Limit actual and planned progress to the current calendar slice. |
+| Period | Day, Week, Month | Compare today with the current catch-up pace, or limit actual and planned progress to the current week/month. |
 | Visualization | Ring, Waterline | Change the compact progress glyph without changing the underlying value. |
 
 Overall progress is revenue-based because client hours with different rates
 cannot be summed meaningfully. Individual client cards can be viewed in hours
 or revenue.
+
+In **Day** mode, each client ring uses the same live denominator shown as
+**/day to goal** on its client card. Falling behind earlier in the month raises
+today's threshold; getting ahead lowers it. Week and Month modes continue to
+use the planned share of the monthly goal for their selected calendar slice.
 
 ### Pacing
 

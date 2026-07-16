@@ -43,12 +43,27 @@ struct AggregateProgress: Sendable {
         var client: ClientConfig
         var actualRevenue: Decimal
         var targetRevenue: Decimal
+        /// A zero target can still be meaningful: once the monthly goal is
+        /// complete, "per day to goal" is zero and today's ring is complete.
+        var targetIsAvailable: Bool
 
         var id: Int { client.id }
 
         var fraction: Double {
-            guard targetRevenue > 0 else { return 0 }
+            guard targetRevenue > 0 else { return targetIsAvailable ? 1 : 0 }
             return (actualRevenue / targetRevenue).doubleValue
+        }
+
+        init(
+            client: ClientConfig,
+            actualRevenue: Decimal,
+            targetRevenue: Decimal,
+            targetIsAvailable: Bool? = nil
+        ) {
+            self.client = client
+            self.actualRevenue = actualRevenue
+            self.targetRevenue = targetRevenue
+            self.targetIsAvailable = targetIsAvailable ?? (targetRevenue > 0)
         }
     }
 
@@ -56,9 +71,10 @@ struct AggregateProgress: Sendable {
 
     var actualRevenue: Decimal { shares.reduce(0) { $0 + $1.actualRevenue } }
     var targetRevenue: Decimal { shares.reduce(0) { $0 + $1.targetRevenue } }
+    var targetIsAvailable: Bool { shares.contains(where: \.targetIsAvailable) }
 
     var fraction: Double {
-        guard targetRevenue > 0 else { return 0 }
+        guard targetRevenue > 0 else { return targetIsAvailable ? 1 : 0 }
         return (actualRevenue / targetRevenue).doubleValue
     }
 }
@@ -144,12 +160,15 @@ enum ProgressCalculator {
         }
 
         let actualHours = cumulativeActualHours
-        let requiredDaily: Decimal? = goal.map { goal in
-            let remainingHours = max(0, goal.hours - actualHours)
-            let remainingWeight = remainingScheduledDays(
-                month: month, pacing: client.pacing, timeZone: timeZone, after: now
+        let requiredDaily = goal.map {
+            requiredDailyHours(
+                goal: $0,
+                actualHours: actualHours,
+                month: month,
+                pacing: client.pacing,
+                timeZone: timeZone,
+                now: now
             )
-            return remainingWeight > 0 ? remainingHours / Decimal(remainingWeight) : remainingHours
         }
 
         return ClientProgress(
@@ -202,22 +221,45 @@ enum ProgressCalculator {
                     periodWeight += weights[dayIndex]
                 }
             }
-            let target = totalWeight == 0
-                ? Decimal(0)
-                : goal.revenue * Decimal(periodWeight) / Decimal(totalWeight)
-
             // Actual revenue from entries starting inside the period.
             var hours: Decimal = 0
+            var monthHours: Decimal = 0
             for entry in entries where entry.clientID == client.id {
+                let entryHours = Decimal(entry.elapsed(asOf: now)) / 3600
                 if entry.start >= interval.start && entry.start < interval.end {
-                    hours += Decimal(entry.elapsed(asOf: now)) / 3600
+                    hours += entryHours
                 }
+                if period == .day, month.contains(entry.start, in: timeZone) {
+                    monthHours += entryHours
+                }
+            }
+
+            // Today's ring uses the same dynamic catch-up pace shown on the
+            // client card. Week and month retain their calendar-slice plans.
+            let target: Decimal
+            let targetIsAvailable: Bool
+            if period == .day {
+                target = requiredDailyHours(
+                    goal: goal,
+                    actualHours: monthHours,
+                    month: month,
+                    pacing: client.pacing,
+                    timeZone: timeZone,
+                    now: now
+                ) * goal.hourlyRate
+                targetIsAvailable = true
+            } else {
+                target = totalWeight == 0
+                    ? Decimal(0)
+                    : goal.revenue * Decimal(periodWeight) / Decimal(totalWeight)
+                targetIsAvailable = target > 0
             }
 
             shares.append(AggregateProgress.ClientShare(
                 client: client,
                 actualRevenue: hours * goal.hourlyRate,
-                targetRevenue: target
+                targetRevenue: target,
+                targetIsAvailable: targetIsAvailable
             ))
         }
         return AggregateProgress(shares: shares)
@@ -297,6 +339,29 @@ enum ProgressCalculator {
             }
         }
         return remaining
+    }
+
+    /// Current average hours needed on each remaining scheduled day. Shared
+    /// by the client card and today's menu-bar ring so their denominators stay
+    /// identical.
+    static func requiredDailyHours(
+        goal: MonthlyGoal,
+        actualHours: Decimal,
+        month: YearMonth,
+        pacing: PacingMode,
+        timeZone: TimeZone,
+        now: Date
+    ) -> Decimal {
+        let remainingHours = max(0, goal.hours - actualHours)
+        let remainingWeight = remainingScheduledDays(
+            month: month,
+            pacing: pacing,
+            timeZone: timeZone,
+            after: now
+        )
+        return remainingWeight > 0
+            ? remainingHours / Decimal(remainingWeight)
+            : remainingHours
     }
 
     /// The date interval the menu bar aggregates over, clipped to the month.

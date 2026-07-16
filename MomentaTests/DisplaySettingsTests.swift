@@ -211,6 +211,25 @@ struct MenuBarPresentationTests {
         #expect(presentation.accessibilityValue.contains("no goal"))
     }
 
+    @Test func completedZeroPaceRendersAsFullProgress() {
+        let cornerstone = client(id: 1, name: "Cornerstone")
+        let progress = AggregateProgress(shares: [
+            .init(
+                client: cornerstone,
+                actualRevenue: 0,
+                targetRevenue: 0,
+                targetIsAvailable: true
+            ),
+        ])
+        var settings = DisplaySettings()
+        settings.menuBarObjectMode = .both
+
+        let presentation = MenuBarPresentation(aggregate: progress, settings: settings)
+
+        #expect(presentation.aggregation?.fraction == 1)
+        #expect(presentation.clients[0].fraction == 1)
+    }
+
     @Test func missingProgressProducesOneNeutralState() {
         let presentation = MenuBarPresentation(
             aggregate: AggregateProgress(shares: []),

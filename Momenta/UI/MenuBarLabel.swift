@@ -49,7 +49,7 @@ struct MenuBarPresentation: Equatable, Sendable {
             id: "aggregation",
             name: "Overall",
             monogram: nil,
-            fraction: aggregate.targetRevenue > 0 ? aggregate.fraction : nil
+            fraction: aggregate.targetIsAvailable ? aggregate.fraction : nil
         )
         let clientObjects = aggregate.shares.map { share in
             let name = share.client.displayName
@@ -61,7 +61,7 @@ struct MenuBarPresentation: Equatable, Sendable {
                 id: "client-\(share.id)",
                 name: name,
                 monogram: firstCharacter.isEmpty ? "•" : String(firstCharacter.prefix(1)),
-                fraction: share.targetRevenue > 0 ? share.fraction : nil
+                fraction: share.targetIsAvailable ? share.fraction : nil
             )
         }
 
