@@ -86,6 +86,7 @@ struct SettingsView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .navigationTitle(currentSection.label)
         .toolbar { navigatorToolbar }
+        .scrollEdgeEffectHidden(true, for: .top)
     }
 
     /// Clients is a normal settings page. Its fixed-width selector belongs to
