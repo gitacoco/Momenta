@@ -107,8 +107,13 @@ struct SettingsView: View {
                 .padding(.vertical, 16)
                 .padding(.trailing, 16)
 
+            // 476 = 940 window minimum - 188 sidebar pane - 276 selector block
+            // (20 leading + 240 card + 16 trailing). One point more and the
+            // page's minimums exceed the window minimum, which makes SwiftUI
+            // overflow the whole split container 2 pt past each window edge —
+            // visibly shifting the sidebar and toolbar left on navigation.
             ClientDetailColumn(selectedClientID: selectedClientID)
-                .frame(minWidth: 480, maxWidth: .infinity, maxHeight: .infinity)
+                .frame(minWidth: 476, maxWidth: .infinity, maxHeight: .infinity)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }

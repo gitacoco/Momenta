@@ -425,6 +425,10 @@ confirmed both defects gone with a physical mouse on the rebuilt
 
 ### Known follow-up
 
-Navigating to Clients momentarily shifts the sidebar panel and the detail
-toolbar/title left by a few pixels (transient). Under investigation; not a
-regression of the two resolved defects.
+Navigating to Clients shifted the sidebar panel and the detail
+toolbar/title left by 2 px while the window sat at its 940 pt minimum.
+Root cause: the Clients page's minimum widths summed to 944 pt
+(188 sidebar pane + 276 selector block + 480 detail minimum), 4 pt more
+than the window minimum, so SwiftUI overflowed the split container 2 pt
+past each window edge. Fixed by trimming the client detail minimum to
+476 pt so the page fits the window minimum exactly.
