@@ -182,6 +182,11 @@ Do not claim success without a physical-mouse retest or instrumentation that rec
 The latest attempt was rebuilt with Xcode 26 and installed into `/Applications/Momenta.app`:
 
 ```sh
+# Build with the project's automatic signing (Apple Development
+# certificate, team 78HM32W7XF). Do NOT disable code signing and re-sign
+# ad hoc: an ad-hoc signature changes its designated requirement on every
+# rebuild, so the login keychain re-prompts for the app's stored secrets
+# after each install.
 env DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \
   /usr/bin/xcodebuild -quiet \
   -project Momenta.xcodeproj \
@@ -189,12 +194,7 @@ env DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \
   -configuration Debug \
   -destination 'platform=macOS,arch=arm64' \
   -derivedDataPath .build/DerivedData \
-  CODE_SIGNING_ALLOWED=NO \
   build
-
-codesign --force --deep --sign - \
-  --entitlements Momenta/Momenta.entitlements \
-  .build/DerivedData/Build/Products/Debug/Momenta.app
 
 pkill -x Momenta
 ditto .build/DerivedData/Build/Products/Debug/Momenta.app /Applications/Momenta.app
