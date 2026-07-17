@@ -31,7 +31,7 @@ enum TogglAPIError: Error, Equatable, LocalizedError {
         case .unauthorized:
             return "Toggl rejected the API token. Check the token and reconnect."
         case .rateLimited:
-            return "Toggl API quota reached (free plan: 30 requests/hour)."
+            return "Toggl API quota reached."
         case .offline:
             return "You appear to be offline."
         case .server(let status):
