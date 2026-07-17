@@ -68,14 +68,37 @@ struct AggregateProgress: Sendable {
     }
 
     var shares: [ClientShare]
+    private var overallActualRevenue: Decimal?
+    private var overallTargetRevenue: Decimal?
+    private var overallTargetAvailability: Bool?
 
-    var actualRevenue: Decimal { shares.reduce(0) { $0 + $1.actualRevenue } }
-    var targetRevenue: Decimal { shares.reduce(0) { $0 + $1.targetRevenue } }
-    var targetIsAvailable: Bool { shares.contains(where: \.targetIsAvailable) }
+    var actualRevenue: Decimal {
+        overallActualRevenue ?? shares.reduce(0) { $0 + $1.actualRevenue }
+    }
+
+    var targetRevenue: Decimal {
+        overallTargetRevenue ?? shares.reduce(0) { $0 + $1.targetRevenue }
+    }
+
+    var targetIsAvailable: Bool {
+        overallTargetAvailability ?? shares.contains(where: \.targetIsAvailable)
+    }
 
     var fraction: Double {
         guard targetRevenue > 0 else { return targetIsAvailable ? 1 : 0 }
         return (actualRevenue / targetRevenue).doubleValue
+    }
+
+    init(
+        shares: [ClientShare],
+        overallActualRevenue: Decimal? = nil,
+        overallTargetRevenue: Decimal? = nil,
+        overallTargetIsAvailable: Bool? = nil
+    ) {
+        self.shares = shares
+        self.overallActualRevenue = overallActualRevenue
+        self.overallTargetRevenue = overallTargetRevenue
+        self.overallTargetAvailability = overallTargetIsAvailable
     }
 }
 
@@ -206,9 +229,15 @@ enum ProgressCalculator {
         )
 
         var shares: [AggregateProgress.ClientShare] = []
+        var totalGoalRevenue: Decimal = 0
+        var monthActualRevenue: Decimal = 0
+        var aggregateWeights = [Int](repeating: 0, count: month.dayCount(in: timeZone))
         for client in clients where client.state(for: month) == .configured {
             guard let goal = client.goal(for: month), goal.isComplete else { continue }
             let weights = dailyWeights(month: month, pacing: client.pacing, timeZone: timeZone)
+            for index in weights.indices where weights[index] > 0 {
+                aggregateWeights[index] = 1
+            }
             let totalWeight = weights.reduce(0, +)
             let calendar = YearMonth.calendar(in: timeZone)
             let monthStart = month.start(in: timeZone)
@@ -233,6 +262,8 @@ enum ProgressCalculator {
                     monthHours += entryHours
                 }
             }
+            totalGoalRevenue += goal.revenue
+            monthActualRevenue += monthHours * goal.hourlyRate
 
             // Today's ring uses the same dynamic catch-up pace shown on the
             // client card. Week and month retain their calendar-slice plans.
@@ -262,7 +293,40 @@ enum ProgressCalculator {
                 targetIsAvailable: targetIsAvailable
             ))
         }
-        return AggregateProgress(shares: shares)
+
+        guard period == .day else {
+            return AggregateProgress(shares: shares)
+        }
+
+        // Overall is money-only and client-agnostic. Freeze today's target at
+        // the start of the day so work performed today cannot lower its own
+        // denominator. Revenue above one client's goal offsets another's gap.
+        let todayActualRevenue = shares.reduce(0) { $0 + $1.actualRevenue }
+        let actualRevenueBeforeToday = max(0, monthActualRevenue - todayActualRevenue)
+        let remainingRevenueAtDayStart = max(0, totalGoalRevenue - actualRevenueBeforeToday)
+        let calendar = YearMonth.calendar(in: timeZone)
+        let monthStart = month.start(in: timeZone)
+        var todayIsScheduled = false
+        var remainingScheduledDays = 0
+        for dayIndex in aggregateWeights.indices where aggregateWeights[dayIndex] > 0 {
+            guard let dayStart = calendar.date(byAdding: .day, value: dayIndex, to: monthStart) else { continue }
+            if dayStart == interval.start {
+                todayIsScheduled = true
+            }
+            if dayStart >= interval.start {
+                remainingScheduledDays += 1
+            }
+        }
+        let overallTarget = todayIsScheduled && remainingScheduledDays > 0
+            ? remainingRevenueAtDayStart / Decimal(remainingScheduledDays)
+            : Decimal(0)
+
+        return AggregateProgress(
+            shares: shares,
+            overallActualRevenue: todayActualRevenue,
+            overallTargetRevenue: overallTarget,
+            overallTargetIsAvailable: !shares.isEmpty
+        )
     }
 
     // MARK: Uncategorized

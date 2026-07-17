@@ -295,7 +295,7 @@ struct ProgressCalculatorTests {
         #expect(aggregate.fraction == 0.5)
     }
 
-    @Test func dayAggregateUsesCatchUpPaceShownOnClientCard() {
+    @Test func dayClientShareUsesCatchUpPaceWhileOverallFreezesAtDayStart() {
         let goal = MonthlyGoal(hourlyRate: 100, input: .hours(50))
         let config = client(pacing: .weekdays, goal: goal)
         let now = date(day: 16, hour: 16)
@@ -319,6 +319,67 @@ struct ProgressCalculatorTests {
         #expect(share.targetRevenue == clientProgress.requiredDailyHours! * 100)
         #expect(abs(share.fraction - (36.0 / 37.0)) < 0.000_001)
         #expect(share.fraction < 1)
+
+        // Overall uses the 40h remaining before today's 3h began. Its target
+        // stays fixed at 40/12h even while the client card's live pace falls.
+        #expect(aggregate.targetRevenue == Decimal(4_000) / Decimal(12))
+        #expect(abs(aggregate.fraction - 0.9) < 0.000_001)
+    }
+
+    @Test func overallDayTargetCannotBeLoweredByWorkPerformedToday() {
+        let goal = MonthlyGoal(hourlyRate: 100, input: .hours(100))
+        let config = client(pacing: .calendarDays, goal: goal)
+        let start = date(day: 22, hour: 8)
+        let entries = [
+            TimeEntry(
+                id: 1,
+                clientID: 1,
+                start: start,
+                stop: start.addingTimeInterval(9.1 * 3600)
+            ),
+        ]
+
+        let aggregate = ProgressCalculator.aggregate(
+            clients: [config], entries: entries, month: july,
+            period: .day, timeZone: utc, now: date(day: 22, hour: 20)
+        )
+
+        // Ten calendar days remain. The frozen target is 10h, so 9.1h is
+        // only 91% rather than a false completion against a falling target.
+        #expect(aggregate.targetRevenue == 1_000)
+        #expect(abs(aggregate.fraction - 0.91) < 0.000_001)
+        #expect(aggregate.shares[0].fraction > 1)
+    }
+
+    @Test func overallRevenueAllowsOneClientToOffsetAnother() {
+        var cornerstone = client(
+            pacing: .calendarDays,
+            goal: MonthlyGoal(hourlyRate: 200, input: .hours(10))
+        )
+        cornerstone.id = 1
+        var providence = client(
+            pacing: .calendarDays,
+            goal: MonthlyGoal(hourlyRate: 100, input: .hours(10))
+        )
+        providence.id = 2
+        let entries = [
+            // Cornerstone already produced $2,400 before the final day,
+            // exceeding its own $2,000 goal while Providence remains at $0.
+            TimeEntry(id: 1, clientID: 1, start: date(day: 1, hour: 8), stop: date(day: 1, hour: 20)),
+            // Another $600 from Cornerstone reaches the combined $3,000 goal.
+            TimeEntry(id: 2, clientID: 1, start: date(day: 31, hour: 9), stop: date(day: 31, hour: 12)),
+        ]
+
+        let aggregate = ProgressCalculator.aggregate(
+            clients: [cornerstone, providence], entries: entries, month: july,
+            period: .day, timeZone: utc, now: date(day: 31, hour: 13)
+        )
+
+        #expect(aggregate.targetRevenue == 600)
+        #expect(aggregate.actualRevenue == 600)
+        #expect(aggregate.fraction == 1)
+        #expect(aggregate.shares[0].fraction == 1)
+        #expect(aggregate.shares[1].fraction == 0)
     }
 
     @Test func completedMonthlyGoalMakesTodayRingCompleteAtZeroPace() {
@@ -377,8 +438,9 @@ struct ProgressCalculatorTests {
             periodReference: date(day: 16, hour: 8)
         )
 
-        // The cached snapshot still says 30h remain over 17 calendar days.
-        #expect(aggregate.targetRevenue == Decimal(3_000) / Decimal(17))
+        // The cached snapshot says 30h remained before July 16, spread over
+        // the 16 calendar days from the period reference through month end.
+        #expect(aggregate.targetRevenue == Decimal(3_000) / Decimal(16))
         #expect(aggregate.actualRevenue == 0)
     }
 
