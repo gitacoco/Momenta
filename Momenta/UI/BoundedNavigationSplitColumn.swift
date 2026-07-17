@@ -16,9 +16,13 @@ extension View {
         anchorPreference(key: PrimarySidebarBoundsPreferenceKey.self, value: .bounds) { $0 }
     }
 
-    /// Replaces the unconstrained native divider hit target with a bounded
-    /// resize handle while leaving NavigationSplitView responsible for layout
-    /// and rendering.
+    /// Locks the primary sidebar boundary. NavigationSplitView never
+    /// propagates `navigationSplitViewColumnWidth` into its underlying
+    /// AppKit `NSSplitViewItem` (the item ships with min 140 / max
+    /// unbounded), so the native divider — reachable through a hit-test
+    /// pass-through band in the titlebar — can live-drag the sidebar to any
+    /// width. This modifier pins the real split item and shields the
+    /// titlebar band so no live drag can start anywhere on the boundary.
     func boundedPrimarySidebarResizeHandle(
         minimumWidth: CGFloat,
         maximumWidth: CGFloat
@@ -85,20 +89,22 @@ private struct PrimarySidebarResizeHandle: NSViewRepresentable {
     }
 
     func updateNSView(_ nsView: HandleView, context: Context) {
-        nsView.renderedPosition = renderedPosition
         nsView.minimumWidth = minimumWidth
         nsView.maximumWidth = maximumWidth
-        nsView.scheduleClamp()
+        nsView.enforceNow()
     }
 
+    /// Covers the content-area portion of the divider (arrow cursor, no
+    /// drag) and owns the AppKit-side enforcement for the whole window.
     final class HandleView: NSView {
-        var renderedPosition: CGFloat = 0
         var minimumWidth: CGFloat = 0
         var maximumWidth: CGFloat = .infinity
 
-        private var dragStartX: CGFloat?
-        private var dragStartPosition: CGFloat?
-        private var clampGeneration = 0
+        private var windowObserver: NSObjectProtocol?
+        private weak var observedWindow: NSWindow?
+        private weak var cachedSplitView: NSSplitView?
+        private weak var cachedController: NSSplitViewController?
+        private var titlebarGuard: TitlebarDividerGuardView?
 
         override var isOpaque: Bool { false }
 
@@ -106,85 +112,95 @@ private struct PrimarySidebarResizeHandle: NSViewRepresentable {
             true
         }
 
-        override func viewDidMoveToWindow() {
-            super.viewDidMoveToWindow()
-            if window != nil {
-                scheduleClamp()
-            }
-        }
-
         override func hitTest(_ point: NSPoint) -> NSView? {
             bounds.contains(point) ? self : nil
         }
 
-        override func mouseDown(with event: NSEvent) {
-            dragStartX = event.locationInWindow.x
-            dragStartPosition = primarySplitterPosition() ?? renderedPosition
-        }
-
-        override func mouseDragged(with event: NSEvent) {
-            guard let dragStartX, let dragStartPosition else { return }
-            let proposedPosition = dragStartPosition + event.locationInWindow.x - dragStartX
-            setPrimarySplitterPosition(bounded(proposedPosition))
-        }
-
-        override func mouseUp(with event: NSEvent) {
-            dragStartX = nil
-            dragStartPosition = nil
-        }
+        // The boundary is fixed: swallow the full click-drag sequence so it
+        // can neither reach the native divider nor fall through to content.
+        override func mouseDown(with event: NSEvent) {}
+        override func mouseDragged(with event: NSEvent) {}
+        override func mouseUp(with event: NSEvent) {}
 
         override func resetCursorRects() {
             super.resetCursorRects()
-            let cursor: NSCursor = minimumWidth == maximumWidth ? .arrow : .resizeLeftRight
-            addCursorRect(bounds, cursor: cursor)
+            addCursorRect(bounds, cursor: .arrow)
         }
 
-        func scheduleClamp() {
-            clampGeneration &+= 1
-            let generation = clampGeneration
-            let restorationCheckDelays: [TimeInterval] = [0, 0.05, 0.15, 0.5, 1, 2, 4]
+        override func viewWillMove(toWindow newWindow: NSWindow?) {
+            super.viewWillMove(toWindow: newWindow)
+            if newWindow == nil {
+                teardown()
+            }
+        }
 
-            for delay in restorationCheckDelays {
-                DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
-                    guard let self, generation == self.clampGeneration else { return }
-                    self.configureTrackedSplitView()
-                    _ = self.clampCurrentPosition()
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            guard let window else { return }
+            teardown()
+            observedWindow = window
+            // Fires once per event-loop pass in which the window updates.
+            // Every check in enforceNow is a compare-before-write, so steady
+            // state costs a few loads and no AppKit mutations. This is what
+            // keeps the lock alive when SwiftUI rebuilds toolbar/navigation
+            // state, without timers or delayed clamps.
+            windowObserver = NotificationCenter.default.addObserver(
+                forName: NSWindow.didUpdateNotification,
+                object: window,
+                queue: .main
+            ) { [weak self] _ in
+                self?.enforceNow()
+            }
+            enforceNow()
+        }
+
+        private func teardown() {
+            if let windowObserver {
+                NotificationCenter.default.removeObserver(windowObserver)
+            }
+            windowObserver = nil
+            titlebarGuard?.removeFromSuperview()
+            titlebarGuard = nil
+            cachedSplitView = nil
+            cachedController = nil
+            observedWindow = nil
+        }
+
+        func enforceNow() {
+            guard let window = observedWindow ?? self.window else { return }
+
+            // The intermittent hairline under the toolbar is the automatic
+            // per-section titlebar separator of the detail split section.
+            // An explicit window-level style overrides every per-item
+            // preference (documented), and reasserting here survives any
+            // later reset by toolbar/navigation updates.
+            if window.titlebarSeparatorStyle != .none {
+                window.titlebarSeparatorStyle = .none
+            }
+
+            if cachedSplitView?.window !== window {
+                cachedSplitView = primarySplitView(in: window)
+                cachedController = cachedSplitView.flatMap(splitViewController(for:))
+            }
+            guard let splitView = cachedSplitView,
+                  let controller = cachedController else { return }
+
+            pinSidebarItem(of: controller)
+            updateTitlebarGuard(in: splitView)
+        }
+
+        /// NavigationSplitView is backed by a real vertical NSSplitView whose
+        /// delegate is SwiftUI's NSSplitViewController subclass.
+        private func primarySplitView(in window: NSWindow) -> NSSplitView? {
+            guard let contentView = window.contentView else { return nil }
+            var stack: [NSView] = [contentView]
+            while let view = stack.popLast() {
+                if let splitView = view as? NSSplitView, splitView.isVertical {
+                    return splitView
                 }
+                stack.append(contentsOf: view.subviews)
             }
-        }
-
-        /// The titlebar divider is an NSTrackingSeparatorToolbarItem. Using
-        /// its public splitView and dividerIndex gives us the exact native
-        /// split item instead of guessing through SwiftUI's hosting hierarchy.
-        private func configureTrackedSplitView() {
-            guard abs(maximumWidth - minimumWidth) < 0.5,
-                  let trackingItem = window?.toolbar?.items.first(where: {
-                      $0.itemIdentifier == .sidebarTrackingSeparator
-                  }) as? NSTrackingSeparatorToolbarItem else { return }
-
-            let splitView = trackingItem.splitView
-            let dividerIndex = trackingItem.dividerIndex
-            guard dividerIndex >= 0,
-                  let controller = splitViewController(for: splitView),
-                  controller.splitViewItems.indices.contains(dividerIndex),
-                  splitView.subviews.indices.contains(dividerIndex) else { return }
-
-            let item = controller.splitViewItems[dividerIndex]
-            item.canCollapse = false
-            item.canCollapseFromWindowResize = false
-            item.minimumThickness = minimumWidth
-            item.maximumThickness = maximumWidth
-            item.automaticMaximumThickness = maximumWidth
-            item.holdingPriority = .required
-
-            if item.isCollapsed {
-                item.isCollapsed = false
-            }
-
-            let position = splitView.subviews[dividerIndex].frame.minX + minimumWidth
-            if abs(splitView.subviews[dividerIndex].frame.maxX - position) > 0.5 {
-                splitView.setPosition(position, ofDividerAt: dividerIndex)
-            }
+            return nil
         }
 
         private func splitViewController(for splitView: NSSplitView) -> NSSplitViewController? {
@@ -199,104 +215,113 @@ private struct PrimarySidebarResizeHandle: NSViewRepresentable {
                 }
                 responder = current.nextResponder
             }
-
-            guard let rootController = splitView.window?.contentViewController else {
-                return nil
-            }
-            return matchingSplitViewController(in: rootController, splitView: splitView)
-        }
-
-        private func matchingSplitViewController(
-            in controller: NSViewController,
-            splitView: NSSplitView
-        ) -> NSSplitViewController? {
-            if let splitController = controller as? NSSplitViewController,
-               splitController.splitView === splitView {
-                return splitController
-            }
-
-            for child in controller.children {
-                if let match = matchingSplitViewController(in: child, splitView: splitView) {
-                    return match
-                }
-            }
             return nil
         }
 
-        @discardableResult
-        private func clampCurrentPosition() -> Bool {
-            guard let position = primarySplitterPosition() else { return false }
-            let boundedPosition = bounded(position)
-            if abs(position - boundedPosition) > 0.5 {
-                setPrimarySplitterPosition(boundedPosition)
+        /// NSSplitViewItem thickness measures the SwiftUI content width (the
+        /// wrapper pane adds its own fixed gutter on top), so the pin uses
+        /// the same 180pt the SwiftUI layer renders. With min == max the
+        /// divider's constrain callbacks clamp every proposed drag position
+        /// to the current one: zero live movement, nothing to snap back.
+        private func pinSidebarItem(of controller: NSSplitViewController) {
+            guard let item = controller.splitViewItems.first else { return }
+
+            if item.canCollapse {
+                item.canCollapse = false
             }
-            return true
+            if item.canCollapseFromWindowResize {
+                item.canCollapseFromWindowResize = false
+            }
+            if item.minimumThickness != minimumWidth {
+                item.minimumThickness = minimumWidth
+            }
+            if item.maximumThickness != maximumWidth {
+                item.maximumThickness = maximumWidth
+            }
+            if item.automaticMaximumThickness != maximumWidth {
+                item.automaticMaximumThickness = maximumWidth
+            }
+            if item.isCollapsed {
+                item.isCollapsed = false
+            }
         }
 
-        private func bounded(_ position: CGFloat) -> CGFloat {
-            min(max(position, minimumWidth), maximumWidth)
-        }
+        /// The titlebar declines hits in a narrow band around the divider so
+        /// the split view can track drags that start in the titlebar. This
+        /// guard sits above the split view's panes inside that band, shows
+        /// the arrow cursor, and swallows the click before NSSplitView's
+        /// divider tracking can begin.
+        private func updateTitlebarGuard(in splitView: NSSplitView) {
+            guard let window = splitView.window else { return }
 
-        private func primarySplitterPosition() -> CGFloat? {
-            guard let splitter = primarySplitter(),
-                  let number = accessibilityValue(of: splitter) as? NSNumber else { return nil }
-            return CGFloat(number.doubleValue)
-        }
-
-        private func setPrimarySplitterPosition(_ position: CGFloat) {
-            guard let splitter = primarySplitter() else { return }
-            setAccessibilityValue(NSNumber(value: Double(position)), on: splitter)
-        }
-
-        /// SwiftUI's macOS 26 split view vends virtual accessibility elements
-        /// rather than an NSSplitView. Its first splitter is the primary one.
-        private func primarySplitter() -> NSObject? {
-            guard let window else { return nil }
-            var visited = Set<ObjectIdentifier>()
-            return firstSplitter(in: window, visited: &visited)
-        }
-
-        private func firstSplitter(
-            in element: NSObject,
-            visited: inout Set<ObjectIdentifier>
-        ) -> NSObject? {
-            let identifier = ObjectIdentifier(element)
-            guard visited.insert(identifier).inserted else { return nil }
-
-            if accessibilityRole(of: element) == .splitter {
-                return element
+            let guardView: TitlebarDividerGuardView
+            if let existing = titlebarGuard, existing.superview === splitView {
+                guardView = existing
+            } else {
+                titlebarGuard?.removeFromSuperview()
+                guardView = TitlebarDividerGuardView()
+                splitView.addSubview(guardView, positioned: .above, relativeTo: nil)
+                titlebarGuard = guardView
             }
 
-            for case let child as NSObject in accessibilityChildren(of: element) {
-                if let splitter = firstSplitter(in: child, visited: &visited) {
-                    return splitter
-                }
+            if splitView.subviews.last !== guardView {
+                splitView.addSubview(guardView, positioned: .above, relativeTo: nil)
             }
-            return nil
-        }
 
-        private func accessibilityRole(of element: NSObject) -> NSAccessibility.Role? {
-            let selector = NSSelectorFromString("accessibilityRole")
-            guard element.responds(to: selector) else { return nil }
-            return element.perform(selector)?.takeUnretainedValue() as? NSAccessibility.Role
+            let titlebarHeight = window.frame.height - window.contentLayoutRect.height
+            let dividerX = splitView.arrangedSubviews.first?.frame.maxX ?? minimumWidth
+            let guardFrame = NSRect(
+                x: dividerX - 6,
+                y: 0,
+                width: 12 + splitView.dividerThickness,
+                height: max(titlebarHeight, 0)
+            )
+            if guardView.frame != guardFrame {
+                guardView.frame = guardFrame
+            }
         }
+    }
+}
 
-        private func accessibilityChildren(of element: NSObject) -> [Any] {
-            let selector = NSSelectorFromString("accessibilityChildren")
-            guard element.responds(to: selector) else { return [] }
-            return element.perform(selector)?.takeUnretainedValue() as? [Any] ?? []
-        }
+/// Transparent shield over the titlebar segment of the sidebar boundary.
+private final class TitlebarDividerGuardView: NSView {
+    override var isOpaque: Bool { false }
 
-        private func accessibilityValue(of element: NSObject) -> Any? {
-            let selector = NSSelectorFromString("accessibilityValue")
-            guard element.responds(to: selector) else { return nil }
-            return element.perform(selector)?.takeUnretainedValue()
-        }
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+        true
+    }
 
-        private func setAccessibilityValue(_ value: Any, on element: NSObject) {
-            let selector = NSSelectorFromString("setAccessibilityValue:")
-            guard element.responds(to: selector) else { return }
-            _ = element.perform(selector, with: value)
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        // hitTest receives the point in the superview's coordinate space.
+        let local = convert(point, from: superview)
+        return bounds.contains(local) ? self : nil
+    }
+
+    override func mouseDown(with event: NSEvent) {}
+    override func mouseDragged(with event: NSEvent) {}
+    override func mouseUp(with event: NSEvent) {}
+
+    override func resetCursorRects() {
+        super.resetCursorRects()
+        addCursorRect(bounds, cursor: .arrow)
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        for area in trackingAreas {
+            removeTrackingArea(area)
         }
+        addTrackingArea(
+            NSTrackingArea(
+                rect: bounds,
+                options: [.cursorUpdate, .activeAlways],
+                owner: self,
+                userInfo: nil
+            )
+        )
+    }
+
+    override func cursorUpdate(with event: NSEvent) {
+        NSCursor.arrow.set()
     }
 }
