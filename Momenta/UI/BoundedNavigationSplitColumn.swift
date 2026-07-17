@@ -247,32 +247,37 @@ private struct PrimarySidebarResizeHandle: NSViewRepresentable {
         }
 
         /// The titlebar declines hits in a narrow band around the divider so
-        /// the split view can track drags that start in the titlebar. This
-        /// guard sits above the split view's panes inside that band, shows
-        /// the arrow cursor, and swallows the click before NSSplitView's
-        /// divider tracking can begin.
+        /// the split view can track drags that start in the titlebar, and the
+        /// titlebar layer also owns the resize-cursor affordance there.
+        /// Cursor arbitration picks the frontmost view, so the guard must sit
+        /// above the titlebar container in the window's frame view — not
+        /// inside the split view — to win both the cursor and the click.
         private func updateTitlebarGuard(in splitView: NSSplitView) {
-            guard let window = splitView.window else { return }
+            guard let window = splitView.window,
+                  let frameRoot = window.contentView?.superview else { return }
 
             let guardView: TitlebarDividerGuardView
-            if let existing = titlebarGuard, existing.superview === splitView {
+            if let existing = titlebarGuard, existing.superview === frameRoot {
                 guardView = existing
             } else {
                 titlebarGuard?.removeFromSuperview()
                 guardView = TitlebarDividerGuardView()
-                splitView.addSubview(guardView, positioned: .above, relativeTo: nil)
+                frameRoot.addSubview(guardView, positioned: .above, relativeTo: nil)
                 titlebarGuard = guardView
             }
 
-            if splitView.subviews.last !== guardView {
-                splitView.addSubview(guardView, positioned: .above, relativeTo: nil)
+            if frameRoot.subviews.last !== guardView {
+                frameRoot.addSubview(guardView, positioned: .above, relativeTo: nil)
             }
 
             let titlebarHeight = window.frame.height - window.contentLayoutRect.height
-            let dividerX = splitView.arrangedSubviews.first?.frame.maxX ?? minimumWidth
+            let dividerXLocal = splitView.arrangedSubviews.first?.frame.maxX ?? minimumWidth
+            let dividerX = splitView.convert(NSPoint(x: dividerXLocal, y: 0), to: frameRoot).x
+            // frameRoot uses bottom-left coordinates; the titlebar occupies
+            // the top titlebarHeight points of the window.
             let guardFrame = NSRect(
                 x: dividerX - 6,
-                y: 0,
+                y: frameRoot.bounds.height - max(titlebarHeight, 0),
                 width: 12 + splitView.dividerThickness,
                 height: max(titlebarHeight, 0)
             )
@@ -314,14 +319,25 @@ private final class TitlebarDividerGuardView: NSView {
         addTrackingArea(
             NSTrackingArea(
                 rect: bounds,
-                options: [.cursorUpdate, .activeAlways],
+                options: [.cursorUpdate, .mouseEnteredAndExited, .mouseMoved, .activeAlways],
                 owner: self,
                 userInfo: nil
             )
         )
     }
 
+    // The titlebar keeps trying to show the divider's resize affordance in
+    // this band, so reassert the arrow on every hover event, not just on
+    // tracking-area entry.
     override func cursorUpdate(with event: NSEvent) {
+        NSCursor.arrow.set()
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        NSCursor.arrow.set()
+    }
+
+    override func mouseMoved(with event: NSEvent) {
         NSCursor.arrow.set()
     }
 }
