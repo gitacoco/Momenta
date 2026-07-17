@@ -10,7 +10,9 @@ Current HEAD while writing this handoff: `c865253` (`Lock native settings sideba
 
 ## Executive status
 
-The settings-window work is **not complete**. The user retested the installed app with a physical mouse after the latest rebuild and confirmed that both remaining visual/interaction defects still reproduce:
+**RESOLVED at `9b93a2a` (2026-07-16).** Both defects were root-caused with in-process instrumentation and fixed; the user confirmed the fix with a physical mouse. See "Resolution" at the end of this document. The sections below are preserved as the historical record of the failed attempts.
+
+Original status: the settings-window work was **not complete**. The user retested the installed app with a physical mouse after the latest rebuild and confirmed that both remaining visual/interaction defects still reproduced:
 
 1. A horizontal separator under the top toolbar/heading still appears intermittently.
 2. The primary sidebar returns to its fixed width after a drag, but the titlebar/sidebar intersection can still enter a live resize interaction. During that interaction the layout can stretch into a severely broken state before snapping back on mouse release.
@@ -357,3 +359,72 @@ No implementation should be handed back as complete until all of these pass in t
 - It is safe to supersede or remove the current boundary implementation after the actual event/view ownership is diagnosed.
 - Preserve unrelated application behavior and the in-page client selector refactor.
 - Commit verified changes locally; do not push unless the user explicitly asks.
+
+## Resolution (2026-07-16, commit `9b93a2a`)
+
+Diagnosed by attaching lldb to the running installed app: split-resize
+notification loggers plus synthetic NSEvents posted to the app's own event
+queue reproduced the titlebar drag with millisecond frame sampling — the
+"instrumentation that records the live frames throughout mouse-down -> drag ->
+mouse-up" this document asked for.
+
+### Bug B (titlebar live resize) — root cause
+
+- macOS 26 NavigationSplitView IS backed by a real vertical `NSSplitView`
+  whose delegate is `SwiftUI.NavigationSplitViewController`
+  (an `NSSplitViewController`).
+- `navigationSplitViewColumnWidth(min:ideal:max:)` is never propagated to the
+  `NSSplitViewItem`: the sidebar item ran with `minimumThickness = 140`,
+  `maximumThickness = -1` (unbounded). The AppKit divider drag was therefore
+  free above 140 pt; SwiftUI reasserted 180 only after mouse-up.
+- The titlebar declines hits in a ~12 pt band around the divider, so a
+  mouse-down there reaches the `NSSplitView` and starts native divider
+  tracking. The old 12 pt overlay stopped at the content area's top and never
+  covered that band.
+- `configureTrackedSplitView()` in `c865253` was dead code: SwiftUI never
+  creates an `NSTrackingSeparatorToolbarItem` in this window, so the guard
+  always failed and no constraint was ever applied.
+- Live validation: pinning the sidebar item to `min == max == 180` in the
+  running process reduced the same synthetic titlebar drag to zero movement
+  (wrapper fixed at 188 pt through the whole down -> drag -> up sequence).
+  Note the thickness semantics: item thickness measures the SwiftUI content
+  width (180); the `_NSSplitViewItemViewWrapper` adds an 8 pt gutter on top
+  (wrapper = 188). Pinning 188 instead grows the pane to 196.
+
+### Bug A (intermittent separator) — root cause
+
+- The line is the AppKit titlebar separator in `.automatic` mode, drawn
+  per split section (detail section only — matching the screenshots), and
+  toggled by AppKit's scroll-under-titlebar heuristics as navigation state
+  changes. `scrollEdgeEffectHidden` controls SwiftUI's separate scroll-edge
+  effect and cannot remove this AppKit separator.
+- `NSWindow.titlebarSeparatorStyle = .none` overrides all per-item
+  preferences (documented). The `d147aa4` attempt assigned it once in
+  `viewDidMoveToWindow` and was reverted 22 minutes later without
+  investigation of persistence.
+
+### Fix (all public API, in `BoundedNavigationSplitColumn.swift`)
+
+`HandleView` now owns window-level enforcement, re-run via a
+compare-before-write pass on `NSWindow.didUpdateNotification`:
+
+1. Pins the sidebar `NSSplitViewItem` (found by walking the window's view
+   tree to the vertical `NSSplitView`, delegate cast to
+   `NSSplitViewController`): `canCollapse = false`,
+   `canCollapseFromWindowResize = false`, `min == max == automaticMax == 180`.
+2. Installs a transparent `TitlebarDividerGuardView` as the topmost subview
+   of the split view over the titlebar pass-through band (divider x ± 6,
+   titlebar height): arrow cursor, `acceptsFirstMouse`, swallows the whole
+   click-drag sequence.
+3. Holds `window.titlebarSeparatorStyle = .none`.
+
+The tracking-item lookup, accessibility-splitter machinery, and the seven
+delayed clamp attempts were deleted. Unit tests: 114 passed. The user
+confirmed both defects gone with a physical mouse on the rebuilt
+`/Applications/Momenta.app`.
+
+### Known follow-up
+
+Navigating to Clients momentarily shifts the sidebar panel and the detail
+toolbar/title left by a few pixels (transient). Under investigation; not a
+regression of the two resolved defects.
