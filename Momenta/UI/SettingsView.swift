@@ -212,7 +212,10 @@ struct SettingsView: View {
                             settings: appState.displaySettings
                         )
                     }
-                    .padding(.horizontal, 18)
+                    // Leading equals the vertical padding so the overall
+                    // ring stays concentric with the capsule's left cap.
+                    .padding(.leading, appState.displaySettings.menuBarVisualization == .ring ? 9 : 18)
+                    .padding(.trailing, 18)
                     .padding(.vertical, 9)
                     .background(Capsule().fill(.quaternary.opacity(0.6)))
                     Text("Live preview of your menu bar item")
