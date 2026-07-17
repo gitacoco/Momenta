@@ -47,6 +47,7 @@ final class AppState {
     var lastAPIError: TogglAPIError?
     var clientListLoading = false
     var clientListError: String?
+    var clientListAPIError: TogglAPIError?
     /// Popover chart unit toggle. View state only, resets with the process.
     var displayUnit: DisplayUnit = .hours
     /// Set right before opening the Settings window to land on a specific
@@ -212,10 +213,13 @@ final class AppState {
             }
             config.merge(workspaces: workspaces, togglClients: allClients)
             clientListError = nil
+            clientListAPIError = nil
         } catch let error as TogglAPIError {
             clientListError = error.errorDescription
+            clientListAPIError = error
         } catch {
             clientListError = error.localizedDescription
+            clientListAPIError = nil
         }
     }
 

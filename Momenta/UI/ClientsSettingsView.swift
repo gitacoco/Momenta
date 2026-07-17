@@ -125,17 +125,23 @@ struct ClientSelectorView: View {
     }
 
     /// Footer shares the selector card's base background — the divider alone
-    /// separates it. Errors wrap fully instead of truncating.
+    /// separates it. The status line sits under the action and matches the
+    /// popover's tone: tinted icon, plain text — informational, not an error.
     private var listFooter: some View {
         VStack(alignment: .leading, spacing: 6) {
-            if let error = appState.clientListError {
-                Text(error)
-                    .font(.caption)
-                    .foregroundStyle(.red)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
             refreshButton
                 .controlSize(.small)
+            if let error = appState.clientListError {
+                HStack(alignment: .firstTextBaseline, spacing: 5) {
+                    Image(systemName: appState.clientListAPIError?.statusIconName ?? "exclamationmark.triangle")
+                        .foregroundStyle(.orange)
+                        .font(.caption)
+                    Text(error)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(10)

@@ -226,7 +226,7 @@ struct DashboardView: View {
     @ViewBuilder
     private var statusLine: some View {
         if let apiError = appState.lastAPIError {
-            Image(systemName: errorIcon(apiError))
+            Image(systemName: apiError.statusIconName)
                 .foregroundStyle(.orange)
                 .font(.caption)
             Text(staleSuffix(apiError.errorDescription ?? "Refresh failed"))
@@ -262,17 +262,20 @@ struct DashboardView: View {
         }
     }
 
-    private func errorIcon(_ error: TogglAPIError) -> String {
-        switch error {
+    /// Failure messages mention that cached data is still being shown.
+    private func staleSuffix(_ message: String) -> String {
+        appState.selectedSnapshot != nil ? "\(message) Showing cached data." : message
+    }
+}
+
+extension TogglAPIError {
+    /// Status-line icon shared by the popover and the settings footer.
+    var statusIconName: String {
+        switch self {
         case .offline: return "wifi.slash"
         case .unauthorized: return "key.slash"
         case .rateLimited: return "clock.badge.exclamationmark"
         case .server, .decoding, .other: return "exclamationmark.triangle"
         }
-    }
-
-    /// Failure messages mention that cached data is still being shown.
-    private func staleSuffix(_ message: String) -> String {
-        appState.selectedSnapshot != nil ? "\(message) Showing cached data." : message
     }
 }
