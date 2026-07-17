@@ -25,6 +25,7 @@ struct DisplaySettingsTests {
             #expect(settings.aggregationPeriod == .week)
             #expect(settings.menuBarObjectMode == expectedMode)
             #expect(settings.menuBarVisualization == .ring)
+            #expect(settings.showsOverallPercentage == false)
             #expect(settings.timeZoneIdentifier == "Pacific/Honolulu")
             #expect(settings.autoRefreshOnOpen == false)
         }
@@ -36,6 +37,7 @@ struct DisplaySettingsTests {
           "aggregationPeriod": "day",
           "menuBarObjectMode": "both",
           "menuBarVisualization": "waterline",
+          "showsOverallPercentage": true,
           "perClientSplit": false,
           "autoRefreshOnOpen": true
         }
@@ -48,6 +50,7 @@ struct DisplaySettingsTests {
 
         #expect(settings.menuBarObjectMode == .both)
         #expect(settings.menuBarVisualization == .waterline)
+        #expect(settings.showsOverallPercentage)
     }
 
     @Test func everyMenuBarCombinationRoundTrips() throws {
@@ -60,6 +63,7 @@ struct DisplaySettingsTests {
                     settings.menuBarObjectMode = mode
                     settings.aggregationPeriod = period
                     settings.menuBarVisualization = visualization
+                    settings.showsOverallPercentage = true
                     settings.timeZoneIdentifier = "UTC"
                     settings.autoRefreshOnOpen = false
 
@@ -87,6 +91,7 @@ struct DisplaySettingsTests {
         #expect(object["perClientSplit"] == nil)
         #expect(object["menuBarObjectMode"] as? String == "split")
         #expect(object["menuBarVisualization"] as? String == "ring")
+        #expect(object["showsOverallPercentage"] as? Bool == false)
     }
 
     @Test func unknownEnumValuesOnlyResetTheirOwnFields() throws {
@@ -108,6 +113,7 @@ struct DisplaySettingsTests {
         #expect(settings.aggregationPeriod == .month)
         #expect(settings.menuBarObjectMode == .aggregation)
         #expect(settings.menuBarVisualization == .ring)
+        #expect(settings.showsOverallPercentage == false)
         #expect(settings.timeZoneIdentifier == "Pacific/Honolulu")
         #expect(settings.autoRefreshOnOpen == false)
     }
@@ -209,6 +215,22 @@ struct MenuBarPresentationTests {
         #expect(presentation.clients[1].fraction == nil)
         #expect(presentation.accessibilityValue.contains("150%"))
         #expect(presentation.accessibilityValue.contains("no goal"))
+    }
+
+    @Test func overallPercentageOnlyAppearsWhenEnabledAndVisible() {
+        var settings = DisplaySettings()
+        settings.menuBarObjectMode = .both
+
+        var presentation = MenuBarPresentation(aggregate: aggregate, settings: settings)
+        #expect(presentation.overallPercentageText == nil)
+
+        settings.showsOverallPercentage = true
+        presentation = MenuBarPresentation(aggregate: aggregate, settings: settings)
+        #expect(presentation.overallPercentageText == "62%")
+
+        settings.menuBarObjectMode = .split
+        presentation = MenuBarPresentation(aggregate: aggregate, settings: settings)
+        #expect(presentation.overallPercentageText == nil)
     }
 
     @Test func completedZeroPaceRendersAsFullProgress() {

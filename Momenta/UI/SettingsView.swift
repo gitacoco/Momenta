@@ -239,9 +239,15 @@ struct SettingsView: View {
                     }
                 }
                 .pickerStyle(.segmented)
+
+                Toggle(
+                    "Show percentage next to Overall",
+                    isOn: $appState.displaySettings.showsOverallPercentage
+                )
+                .disabled(appState.displaySettings.menuBarObjectMode == .split)
             }
 
-            SwiftUI.Section {
+            SwiftUI.Section("Data behavior") {
                 Picker("Refresh data", selection: $appState.displaySettings.autoRefreshOnOpen) {
                     Text("When the popover opens").tag(true)
                     Text("Manually only").tag(false)
@@ -250,9 +256,7 @@ struct SettingsView: View {
                 Text("Toggl's free plan allows 30 API requests per hour. Manual mode spends them only when you ask.")
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
-            }
 
-            SwiftUI.Section("Time") {
                 Picker("Time zone", selection: $appState.displaySettings.timeZoneIdentifier) {
                     Text("System (\(TimeZone.current.identifier))").tag(String?.none)
                     ForEach(TimeZone.knownTimeZoneIdentifiers, id: \.self) { identifier in

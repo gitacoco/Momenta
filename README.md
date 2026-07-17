@@ -82,14 +82,16 @@ After at least one enabled client has a complete rate and goal, choose
 
 ### Menu bar
 
-Momenta exposes three independent display choices in **Settings → Display**
-and in the status item's context menu:
+Momenta exposes four independent display choices in **Settings → Display**.
+Content, period, and visualization are also available in the status item's
+context menu:
 
 | Setting | Options | Meaning |
 | --- | --- | --- |
 | Content | Overall, By Client, Overall + Clients | Choose aggregate progress, individual client progress, or both. |
 | Period | Day, Week, Month | Compare today with the required revenue pace, or limit actual and planned progress to the current week/month. |
 | Visualization | Ring, Waterline | Change the compact progress glyph without changing the underlying value. |
+| Overall percentage | Off, On | Optionally show the numeric Overall percentage beside its indicator. |
 
 Overall progress is revenue-based because client hours with different rates
 cannot be summed meaningfully. Individual client cards can be viewed in hours

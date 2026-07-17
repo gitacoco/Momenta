@@ -198,6 +198,7 @@ struct RefreshLifecycleTests {
         appState.displaySettings.aggregationPeriod = .week
         appState.displaySettings.menuBarObjectMode = .both
         appState.displaySettings.menuBarVisualization = .waterline
+        appState.displaySettings.showsOverallPercentage = true
 
         let relaunched = AppState(
             provider: CountingProvider(),
@@ -210,5 +211,6 @@ struct RefreshLifecycleTests {
         #expect(relaunched.displaySettings.aggregationPeriod == .week)
         #expect(relaunched.displaySettings.menuBarObjectMode == .both)
         #expect(relaunched.displaySettings.menuBarVisualization == .waterline)
+        #expect(relaunched.displaySettings.showsOverallPercentage)
     }
 }

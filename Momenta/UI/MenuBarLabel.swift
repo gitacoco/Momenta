@@ -33,11 +33,13 @@ struct MenuBarPresentation: Equatable, Sendable {
     var period: AggregationPeriod
     var aggregation: ProgressObject?
     var clients: [ProgressObject]
+    var overallPercentageText: String?
 
     init(aggregate: AggregateProgress?, settings: DisplaySettings) {
         objectMode = settings.menuBarObjectMode
         visualization = settings.menuBarVisualization
         period = settings.aggregationPeriod
+        overallPercentageText = nil
 
         guard let aggregate, !aggregate.shares.isEmpty else {
             aggregation = nil
@@ -76,6 +78,12 @@ struct MenuBarPresentation: Equatable, Sendable {
             aggregation = aggregateObject
             clients = clientObjects
         }
+
+        if settings.showsOverallPercentage,
+           aggregation != nil,
+           let fraction = aggregateObject.fraction {
+            overallPercentageText = Format.percent(fraction)
+        }
     }
 
     var isEmpty: Bool {
@@ -92,8 +100,8 @@ struct MenuBarPresentation: Equatable, Sendable {
     }
 }
 
-/// The compact status-item label. Progress is encoded directly in ring or
-/// waterline glyphs; no redundant percentage strings consume menu-bar space.
+/// The compact status-item label. Progress is encoded in ring or waterline
+/// glyphs, with an optional numeric percentage beside Overall.
 struct MenuBarLabel: View {
     var aggregate: AggregateProgress?
     var settings: DisplaySettings
@@ -108,7 +116,14 @@ struct MenuBarLabel: View {
                     .foregroundStyle(.secondary)
             } else {
                 if let aggregation = presentation.aggregation {
-                    progressGlyph(aggregation, style: presentation.visualization)
+                    HStack(spacing: 3) {
+                        progressGlyph(aggregation, style: presentation.visualization)
+                        if let percentage = presentation.overallPercentageText {
+                            Text(percentage)
+                                .font(.system(size: 11).monospacedDigit())
+                                .foregroundStyle(.primary)
+                        }
+                    }
                 }
 
                 if presentation.aggregation != nil, !presentation.clients.isEmpty {

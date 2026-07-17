@@ -81,6 +81,7 @@ struct DisplaySettings: Hashable, Codable, Sendable {
     var aggregationPeriod: AggregationPeriod = .month
     var menuBarObjectMode: MenuBarObjectMode = .aggregation
     var menuBarVisualization: MenuBarVisualization = .ring
+    var showsOverallPercentage: Bool = false
     /// nil follows the system time zone.
     var timeZoneIdentifier: String?
     /// Whether opening the popover triggers a (throttled) refresh, or data
@@ -94,6 +95,7 @@ struct DisplaySettings: Hashable, Codable, Sendable {
         case aggregationPeriod
         case menuBarObjectMode
         case menuBarVisualization
+        case showsOverallPercentage
         // Read-only compatibility with settings written before object modes.
         case perClientSplit
         case timeZoneIdentifier
@@ -114,6 +116,8 @@ struct DisplaySettings: Hashable, Codable, Sendable {
             ?? (legacySplit ? .split : .aggregation)
         menuBarVisualization =
             (try? container.decode(MenuBarVisualization.self, forKey: .menuBarVisualization)) ?? .ring
+        showsOverallPercentage =
+            (try? container.decode(Bool.self, forKey: .showsOverallPercentage)) ?? false
 
         timeZoneIdentifier = try? container.decode(String.self, forKey: .timeZoneIdentifier)
         autoRefreshOnOpen =
@@ -125,6 +129,7 @@ struct DisplaySettings: Hashable, Codable, Sendable {
         try container.encode(aggregationPeriod, forKey: .aggregationPeriod)
         try container.encode(menuBarObjectMode, forKey: .menuBarObjectMode)
         try container.encode(menuBarVisualization, forKey: .menuBarVisualization)
+        try container.encode(showsOverallPercentage, forKey: .showsOverallPercentage)
         try container.encodeIfPresent(timeZoneIdentifier, forKey: .timeZoneIdentifier)
         try container.encode(autoRefreshOnOpen, forKey: .autoRefreshOnOpen)
     }
