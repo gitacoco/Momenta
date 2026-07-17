@@ -178,6 +178,7 @@ struct ClientSelectorView: View {
                 .controlSize(.mini)
                 .labelsHidden()
         }
+        .frame(minHeight: 34)
         .opacity(client.isEnabled ? 1 : 0.6)
     }
 
@@ -192,6 +193,7 @@ struct ClientSelectorView: View {
                 .font(.caption2)
                 .foregroundStyle(.secondary)
         }
+        .frame(minHeight: 34)
         .foregroundStyle(.secondary)
     }
 
@@ -207,8 +209,8 @@ struct ClientSelectorView: View {
 }
 
 /// The right-hand side of the Clients page. Its no-selection state fills the
-/// complete editor area; a selected client keeps a normal in-content heading
-/// above the independently scrolling Form.
+/// complete editor area; a selected client opens its independently scrolling
+/// form without repeating the selection as a heading.
 struct ClientDetailColumn: View {
     @Environment(AppState.self) private var appState
     let selectedClientID: Int?
@@ -220,19 +222,9 @@ struct ClientDetailColumn: View {
     var body: some View {
         ZStack {
             if let id = selectedClientID, let client = appState.config.client(id: id) {
-                VStack(alignment: .leading, spacing: 0) {
-                    Text(client.displayName)
-                        .font(.title2.weight(.semibold))
-                        .lineLimit(1)
-                        .padding(.horizontal, 24)
-                        .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
-                        .accessibilityAddTraits(.isHeader)
-
-                    ClientDetailView(client: client, showsWorkspace: isMultiWorkspace)
-                        .id(id) // reset editor state when switching clients
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                ClientDetailView(client: client, showsWorkspace: isMultiWorkspace)
+                    .id(id) // reset editor state when switching clients
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             } else {
                 ContentUnavailableView {
                     Label("Select a Client", systemImage: "person.crop.rectangle")
