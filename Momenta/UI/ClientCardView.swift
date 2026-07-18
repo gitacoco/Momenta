@@ -1,63 +1,92 @@
 import SwiftUI
 import Charts
 
-/// One client's monthly progress: planned vs actual chart plus pace metrics.
-/// The filled gap between the lines communicates ahead/behind status, while
-/// the current logged value is labeled directly at the end of the actual line.
+/// The data behind one popover client card, selected by the active period.
+enum ClientCardData {
+    case month(ClientProgress)
+    case day(ClientPeriodSlice)
+    case week(ClientPeriodSlice)
+}
+
+/// One client's progress card. Month and week render a cumulative planned-vs-
+/// actual chart; day renders a bullet bar of the day's hours against the
+/// catch-up pace. All three share the header, goal chip, and delta styling.
 struct ClientCardView: View {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.colorSchemeContrast) private var colorSchemeContrast
     @State private var isGoalChipHovered = false
 
-    var progress: ClientProgress
+    var data: ClientCardData
     var unit: DisplayUnit
     var onEditGoal: () -> Void
 
+    // MARK: Shared derived values
+
+    private var client: ClientConfig {
+        switch data {
+        case .month(let progress): return progress.client
+        case .day(let slice), .week(let slice): return slice.client
+        }
+    }
+
+    private var isAhead: Bool {
+        switch data {
+        case .month(let progress): return progress.isAhead
+        case .day(let slice), .week(let slice): return slice.isAhead
+        }
+    }
+
     private var clientColor: Color {
         AccessibleBrandColor.color(
-            hex: progress.client.colorHex,
+            hex: client.colorHex,
             colorScheme: colorScheme,
             colorSchemeContrast: colorSchemeContrast,
-            isAhead: progress.isAhead
+            isAhead: isAhead
         )
     }
 
     private var deltaColor: Color {
-        switch (progress.isAhead, colorScheme) {
+        switch (isAhead, colorScheme) {
         case (true, .light): Color(hex: "#24A148")
         case (true, .dark): Color(hex: "#42BE65")
         case (false, .light): Color(hex: "#DA1E28")
         case (false, .dark): Color(hex: "#FA4D56")
-        @unknown default: Color(hex: progress.isAhead ? "#24A148" : "#DA1E28")
+        @unknown default: Color(hex: isAhead ? "#24A148" : "#DA1E28")
         }
     }
 
     private var deltaIcon: String {
-        progress.isAhead ? "arrow.up.circle.fill" : "arrow.down.circle.fill"
+        isAhead ? "arrow.up.circle.fill" : "arrow.down.circle.fill"
     }
 
-    private var currencyCode: String {
-        progress.client.currency
-    }
+    private var currencyCode: String { client.currency }
+
+    // MARK: Body
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 6) {
-                ClientAvatar(client: progress.client, size: 16)
-                Text(progress.client.displayName)
-                    .font(.headline)
-                if progress.points.contains(where: { $0.actualHours != nil }) == false {
-                    Text("no data yet")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-                goalChip
-            }
-            .padding(.bottom, 8)
-            chart
+            header
+                .padding(.bottom, bodyIsChart ? 8 : 4)
+            switch data {
+            case .month(let progress):
+                periodChart(
+                    points: progress.points,
+                    hasGoal: progress.goal != nil,
+                    marker: unitText(hours: progress.actualHours, revenue: progress.actualRevenue)
+                )
                 .frame(height: 110)
-            metrics
+                monthMetrics(progress)
+            case .week(let slice):
+                periodChart(
+                    points: slice.points,
+                    hasGoal: slice.hasGoal,
+                    marker: unitText(hours: slice.actualHours, revenue: slice.actualRevenue)
+                )
+                .frame(height: 110)
+                weekMetrics(slice)
+            case .day(let slice):
+                dayBullet(slice)
+            }
         }
         .padding(12)
         .background(
@@ -66,12 +95,47 @@ struct ClientCardView: View {
         )
     }
 
+    private var bodyIsChart: Bool {
+        switch data {
+        case .day: return false
+        case .month, .week: return true
+        }
+    }
+
+    // MARK: Header
+
+    private var showsNoDataHint: Bool {
+        switch data {
+        case .month(let progress):
+            return progress.points.contains(where: { $0.actualHours != nil }) == false
+        case .week(let slice):
+            return slice.points.contains(where: { $0.actualHours != nil }) == false
+        case .day:
+            return false
+        }
+    }
+
+    private var header: some View {
+        HStack(spacing: 6) {
+            ClientAvatar(client: client, size: 16)
+            Text(client.displayName)
+                .font(.headline)
+            if showsNoDataHint {
+                Text("no data yet")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            goalChip
+        }
+    }
+
     private var goalChip: some View {
         Button(action: onEditGoal) {
             HStack(spacing: 4) {
                 Text("Goal")
                     .foregroundStyle(.secondary)
-                Text(goalMetricText ?? "Not set")
+                Text(goalChipText ?? "Not set")
                     .fontWeight(.semibold)
             }
             .font(.callout.monospacedDigit())
@@ -81,23 +145,33 @@ struct ClientCardView: View {
         }
         .buttonStyle(GoalChipButtonStyle(isHovered: isGoalChipHovered))
         .onHover { isGoalChipHovered = $0 }
-        .help("Edit \(progress.client.displayName) goal")
-        .accessibilityLabel("Edit goal, \(goalMetricText ?? "not set")")
+        .help("Edit \(client.displayName) goal")
+        .accessibilityLabel("Edit goal, \(goalChipText ?? "not set")")
         .accessibilityHint("Opens this client's goal settings")
     }
 
-    // MARK: Chart
-
-    private var todayPoint: DayProgressPoint? {
-        progress.points.last(where: { $0.actualHours != nil })
+    /// The goal chip shows the period's target: the whole-month goal for month,
+    /// the day's catch-up pace for day, the week's planned slice for week.
+    private var goalChipText: String? {
+        switch data {
+        case .month(let progress):
+            guard let goal = progress.goal else { return nil }
+            return unitText(hours: goal.hours, revenue: goal.revenue)
+        case .day(let slice), .week(let slice):
+            guard let hours = slice.targetHours, let revenue = slice.targetRevenue else { return nil }
+            return unitText(hours: hours, revenue: revenue)
+        }
     }
 
-    private var chart: some View {
-        Chart {
-            if progress.goal != nil {
-                // Color the variance only through the latest elapsed day;
-                // the planned line continues through the rest of the month.
-                ForEach(progress.points.filter { $0.actualHours != nil }) { point in
+    // MARK: Chart (month + week)
+
+    private func periodChart(points: [DayProgressPoint], hasGoal: Bool, marker: String) -> some View {
+        let todayPoint = points.last(where: { $0.actualHours != nil })
+        return Chart {
+            if hasGoal {
+                // Color the variance only through the latest elapsed day; the
+                // planned line continues across the rest of the period.
+                ForEach(points.filter { $0.actualHours != nil }) { point in
                     AreaMark(
                         x: .value("Day", point.day),
                         yStart: .value("Actual", value(actual: point)),
@@ -105,7 +179,7 @@ struct ClientCardView: View {
                     )
                     .foregroundStyle(deltaColor.opacity(0.1))
                 }
-                ForEach(progress.points) { point in
+                ForEach(points) { point in
                     LineMark(
                         x: .value("Day", point.day),
                         y: .value("Planned", value(planned: point)),
@@ -115,7 +189,7 @@ struct ClientCardView: View {
                     .foregroundStyle(Color(nsColor: .tertiaryLabelColor))
                 }
             }
-            ForEach(progress.points.filter { $0.actualHours != nil }) { point in
+            ForEach(points.filter { $0.actualHours != nil }) { point in
                 LineMark(
                     x: .value("Day", point.day),
                     y: .value("Actual", value(actual: point)),
@@ -124,15 +198,15 @@ struct ClientCardView: View {
                 .lineStyle(StrokeStyle(lineWidth: 2))
                 .foregroundStyle(clientColor)
             }
-            if let today = todayPoint {
+            if let todayPoint {
                 PointMark(
-                    x: .value("Today", today.day),
-                    y: .value("Actual", value(actual: today))
+                    x: .value("Today", todayPoint.day),
+                    y: .value("Actual", value(actual: todayPoint))
                 )
                 .symbolSize(36)
                 .foregroundStyle(clientColor)
                 .annotation(position: .trailing, alignment: .leading, spacing: 4) {
-                    Text(actualText)
+                    Text(marker)
                         .font(.caption.weight(.bold).monospacedDigit())
                         .foregroundStyle(clientColor)
                 }
@@ -140,8 +214,6 @@ struct ClientCardView: View {
         }
         .chartLegend(.hidden)
         .chartXAxis {
-            // Dates provide enough horizontal orientation; vertical grid
-            // lines add noise without improving the comparison.
             AxisMarks {
                 AxisValueLabel()
             }
@@ -169,25 +241,30 @@ struct ClientCardView: View {
         }
     }
 
-    // MARK: Metrics
+    // MARK: Metrics — shared
 
-    private var deltaLineText: String? {
-        guard let deltaRevenue = progress.deltaRevenue, let deltaHours = progress.deltaHours else {
-            return nil
+    /// The trailing up/down delta badge shared by the month and week cards.
+    @ViewBuilder
+    private func deltaBadge(_ text: String?) -> some View {
+        if let text {
+            HStack(alignment: .firstTextBaseline, spacing: 5) {
+                Image(systemName: deltaIcon)
+                    .foregroundStyle(deltaColor)
+                Text(text)
+                    .foregroundStyle(.primary)
+            }
+            .font(.callout.weight(.semibold).monospacedDigit())
+            .accessibilityElement(children: .combine)
         }
-        let magnitude: String
-        switch unit {
-        case .revenue: magnitude = Format.currency(abs(deltaRevenue), code: currencyCode)
-        case .hours: magnitude = Format.hours(abs(deltaHours))
-        }
-        return "\(magnitude) \(progress.isAhead ? "ahead" : "behind")"
     }
 
-    private var metrics: some View {
+    // MARK: Metrics — month
+
+    private func monthMetrics(_ progress: ClientProgress) -> some View {
         HStack(alignment: .firstTextBaseline) {
-            if let paceValue {
+            if let pace = paceValue(progress) {
                 HStack(alignment: .firstTextBaseline, spacing: 2) {
-                    Text(paceValue)
+                    Text(pace)
                         .font(.title3.weight(.semibold).monospacedDigit())
                     Text("/day to goal")
                         .font(.callout)
@@ -195,42 +272,157 @@ struct ClientCardView: View {
                 }
             }
             Spacer()
-            if let deltaLineText {
-                HStack(alignment: .firstTextBaseline, spacing: 5) {
-                    Image(systemName: deltaIcon)
-                        .foregroundStyle(deltaColor)
-                    Text(deltaLineText)
-                        .foregroundStyle(.primary)
+            deltaBadge(monthDeltaText(progress))
+        }
+    }
+
+    private func paceValue(_ progress: ClientProgress) -> String? {
+        guard let requiredDaily = progress.requiredDailyHours else { return nil }
+        switch unit {
+        case .revenue: return Format.currency(requiredDaily * progress.hourlyRate, code: currencyCode)
+        case .hours: return Format.hours(requiredDaily)
+        }
+    }
+
+    private func monthDeltaText(_ progress: ClientProgress) -> String? {
+        guard let deltaRevenue = progress.deltaRevenue, let deltaHours = progress.deltaHours else {
+            return nil
+        }
+        let magnitude = unitText(hours: abs(deltaHours), revenue: abs(deltaRevenue))
+        return "\(magnitude) \(progress.isAhead ? "ahead" : "behind")"
+    }
+
+    // MARK: Metrics — week
+
+    private func weekMetrics(_ slice: ClientPeriodSlice) -> some View {
+        HStack(alignment: .firstTextBaseline) {
+            HStack(alignment: .firstTextBaseline, spacing: 4) {
+                Text(unitText(hours: slice.actualHours, revenue: slice.actualRevenue))
+                    .font(.title3.weight(.semibold).monospacedDigit())
+                if let target = slice.targetHours, let targetRevenue = slice.targetRevenue {
+                    Text("of \(unitText(hours: target, revenue: targetRevenue)) planned")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
                 }
-                .font(.callout.weight(.semibold).monospacedDigit())
-                .accessibilityElement(children: .combine)
+            }
+            Spacer()
+            deltaBadge(weekDeltaText(slice))
+        }
+    }
+
+    private func weekDeltaText(_ slice: ClientPeriodSlice) -> String? {
+        guard let deltaHours = slice.deltaHours, let deltaRevenue = slice.deltaRevenue else {
+            return nil
+        }
+        let magnitude = unitText(hours: abs(deltaHours), revenue: abs(deltaRevenue))
+        return "\(magnitude) \(slice.isAhead ? "ahead" : "behind")"
+    }
+
+    // MARK: Bullet — day
+
+    @ViewBuilder
+    private func dayBullet(_ slice: ClientPeriodSlice) -> some View {
+        if let targetHours = slice.targetHours, targetHours > 0 {
+            let fraction = min(max((slice.actualHours / targetHours).doubleValue, 0), 1)
+            VStack(alignment: .leading, spacing: 4) {
+                GeometryReader { proxy in
+                    let fillWidth = fraction > 0 ? max(proxy.size.width * fraction, 46) : 0
+                    ZStack(alignment: .leading) {
+                        Capsule()
+                            .fill(Color.primary.opacity(0.08))
+                        if fraction > 0 {
+                            Capsule()
+                                .fill(clientColor)
+                                .frame(width: fillWidth)
+                                .overlay(alignment: .trailing) {
+                                    Text(unitText(hours: slice.actualHours, revenue: slice.actualRevenue))
+                                        .font(.caption.weight(.bold).monospacedDigit())
+                                        .foregroundStyle(.white)
+                                        .padding(.trailing, 8)
+                                }
+                        } else {
+                            Text(unitText(hours: slice.actualHours, revenue: slice.actualRevenue))
+                                .font(.caption.weight(.bold).monospacedDigit())
+                                .foregroundStyle(.secondary)
+                                .padding(.leading, 8)
+                        }
+                    }
+                }
+                .frame(height: 24)
+                HStack {
+                    Text("0")
+                    Spacer()
+                    Text(unitText(hours: targetHours, revenue: slice.targetRevenue ?? 0))
+                }
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+
+                dayMetrics(slice, targetHours: targetHours)
+                    .padding(.top, 6)
+            }
+        } else {
+            // No goal for the day (rate-backfilled history): just the logged time.
+            HStack {
+                Text(unitText(hours: slice.actualHours, revenue: slice.actualRevenue))
+                    .font(.title3.weight(.semibold).monospacedDigit())
+                Text("logged")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                Spacer()
             }
         }
     }
 
-    private var actualText: String {
-        switch unit {
-        case .revenue: return Format.currency(progress.actualRevenue, code: currencyCode)
-        case .hours: return Format.hours(progress.actualHours)
+    private func dayMetrics(_ slice: ClientPeriodSlice, targetHours: Decimal) -> some View {
+        let overHours = slice.actualHours - targetHours
+        let done = overHours >= 0
+        let fraction = targetHours > 0 ? (slice.actualHours / targetHours).doubleValue : 0
+        return HStack(alignment: .firstTextBaseline) {
+            if done {
+                HStack(alignment: .firstTextBaseline, spacing: 5) {
+                    Text("Done for today")
+                        .font(.callout.weight(.semibold))
+                        .foregroundStyle(deltaColor)
+                    Text("+\(magnitude(hours: overHours, rate: slice.hourlyRate)) over")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
+            } else {
+                HStack(alignment: .firstTextBaseline, spacing: 4) {
+                    Text(magnitude(hours: -overHours, rate: slice.hourlyRate))
+                        .font(.title3.weight(.semibold).monospacedDigit())
+                    Text("left today")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            Spacer()
+            HStack(alignment: .firstTextBaseline, spacing: 5) {
+                Image(systemName: deltaIcon)
+                    .foregroundStyle(deltaColor)
+                Text(Format.percent(fraction))
+                    .foregroundStyle(.primary)
+            }
+            .font(.callout.weight(.semibold).monospacedDigit())
+            .accessibilityElement(children: .combine)
         }
     }
 
-    private var goalMetricText: String? {
-        guard let goal = progress.goal else { return nil }
+    // MARK: Formatting helpers
+
+    /// Renders a paired hours/revenue value in the active unit.
+    private func unitText(hours: Decimal, revenue: Decimal) -> String {
         switch unit {
-        case .revenue: return Format.currency(goal.revenue, code: currencyCode)
-        case .hours: return Format.hours(goal.hours)
+        case .revenue: return Format.currency(revenue, code: currencyCode)
+        case .hours: return Format.hours(hours)
         }
     }
 
-    private var paceValue: String? {
-        guard let requiredDaily = progress.requiredDailyHours else { return nil }
+    /// An hours magnitude priced at the client rate when showing revenue.
+    private func magnitude(hours: Decimal, rate: Decimal) -> String {
         switch unit {
-        case .revenue:
-            let requiredDailyRevenue = requiredDaily * progress.hourlyRate
-            return Format.currency(requiredDailyRevenue, code: currencyCode)
-        case .hours:
-            return Format.hours(requiredDaily)
+        case .revenue: return Format.currency(hours * rate, code: currencyCode)
+        case .hours: return Format.hours(hours)
         }
     }
 }

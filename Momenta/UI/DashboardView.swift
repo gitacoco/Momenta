@@ -23,33 +23,64 @@ struct DashboardView: View {
             // Refresh when the popover opens, throttled so repeated opens
             // don't burn the API quota.
             await appState.refreshIfNeeded()
+            // A current week can straddle into a past neighbouring month.
+            // Opening the popover is a passive trigger, so this respects
+            // manual-refresh mode.
+            appState.prepareWeekNeighbors(userInitiated: false)
         }
     }
 
     // MARK: Header
 
+    /// Navigation title at the active period's granularity.
+    private var navTitle: String {
+        switch appState.displaySettings.aggregationPeriod {
+        case .day: return Format.dayTitle(appState.activeReference, timeZone: appState.timeZone)
+        case .week: return Format.weekRange(appState.activeReference, timeZone: appState.timeZone)
+        case .month: return Format.monthTitle(appState.selectedMonth, timeZone: appState.timeZone)
+        }
+    }
+
+    /// Period phrase for the Overall row: "today"/date, "this week"/range, or
+    /// the month name — matching the current period and reference.
+    private var overallLabel: String {
+        switch appState.displaySettings.aggregationPeriod {
+        case .day:
+            return appState.isReferenceCurrentDay
+                ? "today"
+                : Format.dayShort(appState.activeReference, timeZone: appState.timeZone)
+        case .week:
+            // A stored reference ⇒ a historical week; nil follows now.
+            return appState.selectedReference == nil
+                ? "this week"
+                : Format.weekRange(appState.activeReference, timeZone: appState.timeZone)
+        case .month:
+            return Format.monthName(appState.selectedMonth, timeZone: appState.timeZone)
+        }
+    }
+
     private var header: some View {
         @Bindable var appState = appState
         return HStack(spacing: 8) {
             Button {
-                appState.select(month: appState.selectedMonth.previous)
+                appState.stepBackward()
             } label: {
                 Image(systemName: "chevron.left")
             }
             .buttonStyle(.borderless)
-            .disabled(!appState.canGoToPreviousMonth)
+            .disabled(!appState.canGoBackward)
 
-            Text(Format.monthTitle(appState.selectedMonth, timeZone: appState.timeZone))
+            Text(navTitle)
                 .font(.headline)
                 .frame(minWidth: 110)
 
             Button {
-                appState.select(month: appState.selectedMonth.next)
+                appState.stepForward()
             } label: {
                 Image(systemName: "chevron.right")
             }
             .buttonStyle(.borderless)
-            .disabled(!appState.canGoToNextMonth)
+            .disabled(!appState.canGoForward)
 
             Spacer()
 
@@ -75,9 +106,37 @@ struct DashboardView: View {
         if appState.visibleClients.isEmpty {
             EmptyStateView()
         } else {
-            let progressByID = appState.progressByClientID
-            ScrollView {
+            // The completeness gate: a straddled week with a missing past
+            // month never renders partial numbers — it shows an explicit
+            // pending state instead.
+            switch appState.popoverData() {
+            case .complete(let data):
+                completeContent(data)
+            case .loading(let missing):
+                weekPendingCard(missing: missing, isLoading: true)
+            case .unavailable(let missing):
+                weekPendingCard(missing: missing, isLoading: false)
+            }
+        }
+    }
+
+    private func completeContent(_ data: AppState.PopoverData) -> some View {
+        // One pass computed the month accrual, the period slices, and the
+        // Overall; every row below reads from this shared snapshot.
+        let period = appState.displaySettings.aggregationPeriod
+        return ScrollView {
                 VStack(spacing: 10) {
+                    // The Overall summary sits above the client cards for every
+                    // period, following the h/$ toggle. Derived from the same
+                    // slices the cards use, so nothing is computed twice.
+                    if let overall = data.overall {
+                        OverallRowView(
+                            aggregate: overall,
+                            unit: appState.displayUnit,
+                            label: overallLabel
+                        )
+                        .padding(.top, 2)
+                    }
                     if appState.selectedSnapshot == nil {
                         dataUnavailableBanner
                     }
@@ -88,9 +147,9 @@ struct DashboardView: View {
                     // rate-backfilled historical months), a setup prompt, or
                     // an explicit reason why there's nothing to show.
                     ForEach(appState.visibleClients) { client in
-                        if let progress = progressByID[client.id] {
+                        if let card = cardData(client, period: period, monthProgress: data.progressByClientID, slices: data.sliceByClientID) {
                             ClientCardView(
-                                progress: progress,
+                                data: card,
                                 unit: appState.displayUnit,
                                 onEditGoal: {
                                     appState.pendingSettingsDestination = .clients(clientID: client.id)
@@ -106,11 +165,69 @@ struct DashboardView: View {
                 }
                 .padding(12)
             }
-            // The frame caps long lists. `fixedSize` then asks the scroll
-            // view for its ideal height, so short lists fit their content
-            // instead of expanding to the cap.
-            .frame(maxHeight: maximumContentHeight)
-            .fixedSize(horizontal: false, vertical: true)
+        // The frame caps long lists. `fixedSize` then asks the scroll
+        // view for its ideal height, so short lists fit their content
+        // instead of expanding to the cap.
+        .frame(maxHeight: maximumContentHeight)
+        .fixedSize(horizontal: false, vertical: true)
+    }
+
+    /// Explicit pending state for a week whose past neighbour month isn't
+    /// loaded: never a partial-denominator chart or ring.
+    private func weekPendingCard(missing: Set<YearMonth>, isLoading: Bool) -> some View {
+        let monthNames = missing.sorted()
+            .map { Format.monthTitle($0, timeZone: appState.timeZone) }
+            .joined(separator: ", ")
+        return HStack(alignment: .firstTextBaseline, spacing: 8) {
+            if isLoading {
+                ProgressView()
+                    .controlSize(.small)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Loading week data")
+                        .font(.callout.weight(.semibold))
+                    Text("Fetching \(monthNames) to complete this week.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+            } else {
+                Image(systemName: "icloud.slash")
+                    .foregroundStyle(.orange)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Week data incomplete")
+                        .font(.callout.weight(.semibold))
+                    Text("This week spans \(monthNames), which isn't loaded yet.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button("Load") {
+                    appState.prepareWeekNeighbors(userInitiated: true)
+                }
+                .disabled(appState.isLoading)
+            }
+        }
+        .padding(10)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(isLoading ? Color.primary.opacity(0.04) : Color.orange.opacity(0.1))
+        )
+        .padding(12)
+    }
+
+    /// The period-appropriate data for a client's card, or nil when the client
+    /// has no renderable progress for the shown period (setup / no-data rows
+    /// fall through to their own cards).
+    private func cardData(
+        _ client: ClientConfig,
+        period: AggregationPeriod,
+        monthProgress: [Int: ClientProgress],
+        slices: [Int: ClientPeriodSlice]
+    ) -> ClientCardData? {
+        switch period {
+        case .month: return monthProgress[client.id].map(ClientCardData.month)
+        case .day: return slices[client.id].map(ClientCardData.day)
+        case .week: return slices[client.id].map(ClientCardData.week)
         }
     }
 

@@ -36,8 +36,11 @@ struct ClientProgress: Identifiable, Sendable {
     var isAhead: Bool { (deltaHours ?? 0) >= 0 }
 }
 
-/// Cross-client aggregate for the menu bar. Revenue-only: rates differ per
-/// client, so hours cannot be meaningfully summed across clients.
+/// Cross-client aggregate for the menu bar and the popover Overall row.
+/// Revenue is the canonical cross-client unit (rates differ, so hours cannot be
+/// meaningfully summed). The parallel hours totals exist only for the popover's
+/// hours-mode Overall, where the user opted into a summed-hours view; the menu
+/// bar ignores them and stays revenue-only.
 struct AggregateProgress: Sendable {
     struct ClientShare: Identifiable, Sendable {
         var client: ClientConfig
@@ -71,6 +74,9 @@ struct AggregateProgress: Sendable {
     private var overallActualRevenue: Decimal?
     private var overallTargetRevenue: Decimal?
     private var overallTargetAvailability: Bool?
+    private var overallActualHoursValue: Decimal?
+    private var overallTargetHoursValue: Decimal?
+    private var overallHoursAvailability: Bool?
 
     var actualRevenue: Decimal {
         overallActualRevenue ?? shares.reduce(0) { $0 + $1.actualRevenue }
@@ -89,17 +95,82 @@ struct AggregateProgress: Sendable {
         return (actualRevenue / targetRevenue).doubleValue
     }
 
+    /// Summed actual/target hours across clients. Only populated for the popover
+    /// Overall row; the menu bar never reads these.
+    var actualHours: Decimal { overallActualHoursValue ?? 0 }
+
+    var targetHours: Decimal { overallTargetHoursValue ?? 0 }
+
+    var hoursTargetIsAvailable: Bool { overallHoursAvailability ?? (targetHours > 0) }
+
+    var hoursFraction: Double {
+        guard targetHours > 0 else { return hoursTargetIsAvailable ? 1 : 0 }
+        return (actualHours / targetHours).doubleValue
+    }
+
     init(
         shares: [ClientShare],
         overallActualRevenue: Decimal? = nil,
         overallTargetRevenue: Decimal? = nil,
-        overallTargetIsAvailable: Bool? = nil
+        overallTargetIsAvailable: Bool? = nil,
+        overallActualHours: Decimal? = nil,
+        overallTargetHours: Decimal? = nil,
+        overallHoursTargetIsAvailable: Bool? = nil
     ) {
         self.shares = shares
         self.overallActualRevenue = overallActualRevenue
         self.overallTargetRevenue = overallTargetRevenue
         self.overallTargetAvailability = overallTargetIsAvailable
+        self.overallActualHoursValue = overallActualHours
+        self.overallTargetHoursValue = overallTargetHours
+        self.overallHoursAvailability = overallHoursTargetIsAvailable
     }
+}
+
+/// One client's progress for a specific popover period (day / week / month),
+/// derived from the month-scoped `ClientProgress`. Values are carried in both
+/// hours and revenue so the client card's h/$ toggle and the summed Overall
+/// row both read from the same slice.
+struct ClientPeriodSlice: Identifiable, Sendable {
+    var client: ClientConfig
+    var period: AggregationPeriod
+    var hourlyRate: Decimal
+    /// A goal is in effect for this period (false for rate-backfilled history:
+    /// actuals render, but there is no target line, delta, or pace).
+    var hasGoal: Bool
+
+    /// Cumulative points to chart (week: the week's days; month: the whole
+    /// month). Empty for day (the day card is a bullet, not a chart).
+    var points: [DayProgressPoint]
+
+    /// Period actual — day: the reference day's own hours; week: cumulative
+    /// through the last elapsed day; month: month-to-date cumulative.
+    var actualHours: Decimal
+    var actualRevenue: Decimal
+
+    /// Period target — day: catch-up pace; week: the full-week planned slice;
+    /// month: the whole-month goal. Nil without a goal.
+    var targetHours: Decimal?
+    var targetRevenue: Decimal?
+
+    /// Planned value through the reference point, for the behind/ahead delta.
+    /// Day reuses the target (the bullet compares actual against the day pace).
+    var plannedToDateHours: Decimal?
+    var plannedToDateRevenue: Decimal?
+
+    var id: Int { client.id }
+
+    var deltaHours: Decimal? { plannedToDateHours.map { actualHours - $0 } }
+    var deltaRevenue: Decimal? { plannedToDateRevenue.map { actualRevenue - $0 } }
+    var isAhead: Bool { (deltaHours ?? 0) >= 0 }
+}
+
+/// Periods that aggregate within a single month. Week is deliberately absent
+/// at the type level: weeks are full Mon–Sun intervals that stitch across
+/// month boundaries, and go through `weekAggregate(slices:)` instead.
+enum SingleMonthPeriod: Sendable {
+    case day
+    case month
 }
 
 /// Hours not counted toward any configured client, split by cause:
@@ -211,12 +282,14 @@ enum ProgressCalculator {
     // MARK: Menu bar aggregate
 
     /// Aggregate progress across all configured clients for the slice of the
-    /// month selected by `period` (today / this week / whole month).
+    /// month selected by `period` (a single day, or the whole month). Weeks
+    /// never come through here — they stitch across months via
+    /// `weekAggregate(slices:)`.
     static func aggregate(
         clients: [ClientConfig],
         entries: [TimeEntry],
         month: YearMonth,
-        period: AggregationPeriod,
+        period: SingleMonthPeriod,
         timeZone: TimeZone,
         now: Date,
         periodReference: Date? = nil
@@ -230,7 +303,17 @@ enum ProgressCalculator {
 
         var shares: [AggregateProgress.ClientShare] = []
         var totalGoalRevenue: Decimal = 0
-        var monthActualRevenue: Decimal = 0
+        var totalGoalHours: Decimal = 0
+        // Work completed strictly before the reference day started. Summed
+        // from entry start times directly (not month − referenceDay) so a
+        // back-stepped day doesn't count later days' work as "before".
+        var actualRevenueBeforeDay: Decimal = 0
+        var actualHoursBeforeDay: Decimal = 0
+        // Summed period actual/target hours across clients — the popover's
+        // hours-mode Overall. Meaningless as physics (rates differ), but the
+        // user opted into a summed-hours readout.
+        var periodActualHours: Decimal = 0
+        var periodTargetHours: Decimal = 0
         var aggregateWeights = [Int](repeating: 0, count: month.dayCount(in: timeZone))
         for client in clients where client.state(for: month) == .configured {
             guard let goal = client.goal(for: month), goal.isComplete else { continue }
@@ -253,6 +336,7 @@ enum ProgressCalculator {
             // Actual revenue from entries starting inside the period.
             var hours: Decimal = 0
             var monthHours: Decimal = 0
+            var beforeDayHours: Decimal = 0
             for entry in entries where entry.clientID == client.id {
                 let entryHours = Decimal(entry.elapsed(asOf: now)) / 3600
                 if entry.start >= interval.start && entry.start < interval.end {
@@ -260,31 +344,48 @@ enum ProgressCalculator {
                 }
                 if period == .day, month.contains(entry.start, in: timeZone) {
                     monthHours += entryHours
+                    if entry.start < interval.start {
+                        beforeDayHours += entryHours
+                    }
                 }
             }
             totalGoalRevenue += goal.revenue
-            monthActualRevenue += monthHours * goal.hourlyRate
+            totalGoalHours += goal.hours
+            actualRevenueBeforeDay += beforeDayHours * goal.hourlyRate
+            actualHoursBeforeDay += beforeDayHours
+            periodActualHours += hours
 
             // Today's ring uses the same dynamic catch-up pace shown on the
             // client card. Week and month retain their calendar-slice plans.
+            // Revenue stays exact (from goal.revenue) rather than re-derived
+            // from hours × rate, which could drift for revenue-authored goals.
+            let targetHours: Decimal
             let target: Decimal
             let targetIsAvailable: Bool
             if period == .day {
-                target = requiredDailyHours(
+                targetHours = requiredDailyHours(
                     goal: goal,
                     actualHours: monthHours,
                     month: month,
                     pacing: client.pacing,
                     timeZone: timeZone,
                     now: now
-                ) * goal.hourlyRate
+                )
+                target = targetHours * goal.hourlyRate
                 targetIsAvailable = true
+            } else if totalWeight == 0 {
+                targetHours = 0
+                target = 0
+                targetIsAvailable = false
             } else {
-                target = totalWeight == 0
-                    ? Decimal(0)
-                    : goal.revenue * Decimal(periodWeight) / Decimal(totalWeight)
+                // Multiply before dividing so a divisible slice stays exact
+                // (e.g. 3680 × 5 / 23 == 800, not 799.99…). This keeps the
+                // revenue target byte-identical to the pre-hours behaviour.
+                targetHours = goal.hours * Decimal(periodWeight) / Decimal(totalWeight)
+                target = goal.revenue * Decimal(periodWeight) / Decimal(totalWeight)
                 targetIsAvailable = target > 0
             }
+            periodTargetHours += targetHours
 
             shares.append(AggregateProgress.ClientShare(
                 client: client,
@@ -294,16 +395,27 @@ enum ProgressCalculator {
             ))
         }
 
+        // Month sums the sliced hours directly; only day needs the day-start
+        // freeze below.
         guard period == .day else {
-            return AggregateProgress(shares: shares)
+            return AggregateProgress(
+                shares: shares,
+                overallActualHours: periodActualHours,
+                overallTargetHours: periodTargetHours,
+                overallHoursTargetIsAvailable: periodTargetHours > 0
+            )
         }
 
-        // Overall is money-only and client-agnostic. Freeze today's target at
-        // the start of the day so work performed today cannot lower its own
-        // denominator. Revenue above one client's goal offsets another's gap.
+        // Overall freezes the day's target at the start of the reference day
+        // so work performed that day cannot lower its own denominator. Only
+        // work strictly before the day start reduces the remaining goal — a
+        // back-stepped day must not have later days' work subtracted either.
+        // Revenue above one client's goal offsets another's gap; the hours
+        // track mirrors the same freeze for the popover's summed-hours Overall.
         let todayActualRevenue = shares.reduce(0) { $0 + $1.actualRevenue }
-        let actualRevenueBeforeToday = max(0, monthActualRevenue - todayActualRevenue)
-        let remainingRevenueAtDayStart = max(0, totalGoalRevenue - actualRevenueBeforeToday)
+        let remainingRevenueAtDayStart = max(0, totalGoalRevenue - actualRevenueBeforeDay)
+        let todayActualHours = periodActualHours
+        let remainingHoursAtDayStart = max(0, totalGoalHours - actualHoursBeforeDay)
         let calendar = YearMonth.calendar(in: timeZone)
         let monthStart = month.start(in: timeZone)
         var todayIsScheduled = false
@@ -317,15 +429,193 @@ enum ProgressCalculator {
                 remainingScheduledDays += 1
             }
         }
-        let overallTarget = todayIsScheduled && remainingScheduledDays > 0
+        let scheduledToday = todayIsScheduled && remainingScheduledDays > 0
+        let overallTarget = scheduledToday
             ? remainingRevenueAtDayStart / Decimal(remainingScheduledDays)
+            : Decimal(0)
+        let overallTargetHours = scheduledToday
+            ? remainingHoursAtDayStart / Decimal(remainingScheduledDays)
             : Decimal(0)
 
         return AggregateProgress(
             shares: shares,
             overallActualRevenue: todayActualRevenue,
             overallTargetRevenue: overallTarget,
-            overallTargetIsAvailable: !shares.isEmpty
+            overallTargetIsAvailable: !shares.isEmpty,
+            overallActualHours: todayActualHours,
+            overallTargetHours: overallTargetHours,
+            overallHoursTargetIsAvailable: !shares.isEmpty
+        )
+    }
+
+    // MARK: Popover period slices
+
+    /// The day bullet: the reference day's own hours against the catch-up pace.
+    /// The current day uses the live pace (matching the client card and menu
+    /// bar); a past day freezes the pace at that day's start.
+    static func daySlice(
+        progress: ClientProgress,
+        reference: Date,
+        isCurrentDay: Bool,
+        timeZone: TimeZone
+    ) -> ClientPeriodSlice {
+        let calendar = YearMonth.calendar(in: timeZone)
+        let refDayStart = calendar.startOfDay(for: reference)
+        let index = progress.points.firstIndex { calendar.isDate($0.day, inSameDayAs: refDayStart) }
+
+        let rate = progress.hourlyRate
+        var actual: Decimal = 0
+        var cumulativeBefore: Decimal = 0
+        if let index {
+            let cumulativeThrough = progress.points[index].actualHours ?? 0
+            cumulativeBefore = index > 0 ? (progress.points[index - 1].actualHours ?? 0) : 0
+            actual = max(0, cumulativeThrough - cumulativeBefore)
+        }
+
+        let target: Decimal? = progress.goal.map { goal in
+            if isCurrentDay {
+                return progress.requiredDailyHours ?? goal.hours
+            }
+            return requiredDailyHours(
+                goal: goal,
+                actualHours: cumulativeBefore,
+                month: progress.month,
+                pacing: progress.client.pacing,
+                timeZone: timeZone,
+                now: refDayStart
+            )
+        }
+
+        return ClientPeriodSlice(
+            client: progress.client,
+            period: .day,
+            hourlyRate: rate,
+            hasGoal: progress.goal != nil,
+            points: [],
+            actualHours: actual,
+            actualRevenue: actual * rate,
+            targetHours: target,
+            targetRevenue: target.map { $0 * rate },
+            plannedToDateHours: target,
+            plannedToDateRevenue: target.map { $0 * rate }
+        )
+    }
+
+    /// The week card: a true Monday–Sunday cumulative series, stitched across a
+    /// month boundary from each day's own month progress. `progressByMonth`
+    /// holds this client's progress for every month the week touches.
+    static func weekSlice(
+        client: ClientConfig,
+        progressByMonth: [YearMonth: ClientProgress],
+        reference: Date,
+        timeZone: TimeZone
+    ) -> ClientPeriodSlice {
+        let calendar = YearMonth.calendar(in: timeZone)
+        let weekStart = calendar.dateInterval(of: .weekOfYear, for: reference)?.start
+            ?? calendar.startOfDay(for: reference)
+
+        var points: [DayProgressPoint] = []
+        var cumulativePlannedHours: Decimal?
+        var cumulativePlannedRevenue: Decimal?
+        var cumulativeActualHours: Decimal?
+        var cumulativeActualRevenue: Decimal?
+        var hasGoal = false
+        var rate = client.effectiveRate(for: YearMonth(containing: reference, timeZone: timeZone)) ?? 0
+
+        var actualToDateHours: Decimal = 0
+        var actualToDateRevenue: Decimal = 0
+        var plannedToDateHours: Decimal?
+        var plannedToDateRevenue: Decimal?
+
+        for offset in 0..<7 {
+            guard let dayStart = calendar.date(byAdding: .day, value: offset, to: weekStart) else { continue }
+            let dayMonth = YearMonth(containing: dayStart, timeZone: timeZone)
+            let progress = progressByMonth[dayMonth]
+            let dayIndex = progress.flatMap { p in
+                p.points.firstIndex { calendar.isDate($0.day, inSameDayAs: dayStart) }
+            }
+
+            var dailyPlannedHours: Decimal?
+            var dailyActualHours: Decimal?
+            if let progress, let dayIndex {
+                rate = progress.hourlyRate
+                let point = progress.points[dayIndex]
+                let previousPlanned = dayIndex > 0 ? progress.points[dayIndex - 1].plannedHours : 0
+                if let planned = point.plannedHours {
+                    dailyPlannedHours = planned - (previousPlanned ?? 0)
+                    hasGoal = true
+                }
+                if let actual = point.actualHours {
+                    let previousActual = dayIndex > 0 ? (progress.points[dayIndex - 1].actualHours ?? 0) : 0
+                    dailyActualHours = max(0, actual - previousActual)
+                }
+            }
+
+            if let dailyPlannedHours {
+                cumulativePlannedHours = (cumulativePlannedHours ?? 0) + dailyPlannedHours
+                cumulativePlannedRevenue = (cumulativePlannedRevenue ?? 0) + dailyPlannedHours * rate
+            }
+            let dayIsElapsed = dailyActualHours != nil
+            if let dailyActualHours {
+                cumulativeActualHours = (cumulativeActualHours ?? 0) + dailyActualHours
+                cumulativeActualRevenue = (cumulativeActualRevenue ?? 0) + dailyActualHours * rate
+                actualToDateHours = cumulativeActualHours ?? 0
+                actualToDateRevenue = cumulativeActualRevenue ?? 0
+                plannedToDateHours = cumulativePlannedHours
+                plannedToDateRevenue = cumulativePlannedRevenue
+            }
+
+            points.append(DayProgressPoint(
+                day: dayStart,
+                plannedHours: cumulativePlannedHours,
+                plannedRevenue: cumulativePlannedRevenue,
+                actualHours: dayIsElapsed ? cumulativeActualHours : nil,
+                actualRevenue: dayIsElapsed ? cumulativeActualRevenue : nil
+            ))
+        }
+
+        return ClientPeriodSlice(
+            client: client,
+            period: .week,
+            hourlyRate: rate,
+            hasGoal: hasGoal,
+            points: points,
+            actualHours: actualToDateHours,
+            actualRevenue: actualToDateRevenue,
+            targetHours: hasGoal ? (cumulativePlannedHours ?? 0) : nil,
+            targetRevenue: hasGoal ? (cumulativePlannedRevenue ?? 0) : nil,
+            plannedToDateHours: plannedToDateHours,
+            plannedToDateRevenue: plannedToDateRevenue
+        )
+    }
+
+    /// Cross-client week aggregate built from the same per-client slices the
+    /// week cards render, so the Overall ring, the per-client menu-bar shares,
+    /// and the cards agree by construction — including cross-month stitching.
+    /// Pass slices in config order; shares preserve it. Nil when no slice
+    /// carries a goal.
+    static func weekAggregate(slices: [ClientPeriodSlice]) -> AggregateProgress? {
+        let contributing = slices.filter(\.hasGoal)
+        guard !contributing.isEmpty else { return nil }
+        let shares = contributing.map { slice in
+            AggregateProgress.ClientShare(
+                client: slice.client,
+                actualRevenue: slice.actualRevenue,
+                targetRevenue: slice.targetRevenue ?? 0
+            )
+        }
+        let actualHours = contributing.reduce(Decimal(0)) { $0 + $1.actualHours }
+        let targetHours = contributing.reduce(Decimal(0)) { $0 + ($1.targetHours ?? 0) }
+        let actualRevenue = contributing.reduce(Decimal(0)) { $0 + $1.actualRevenue }
+        let targetRevenue = contributing.reduce(Decimal(0)) { $0 + ($1.targetRevenue ?? 0) }
+        return AggregateProgress(
+            shares: shares,
+            overallActualRevenue: actualRevenue,
+            overallTargetRevenue: targetRevenue,
+            overallTargetIsAvailable: targetRevenue > 0,
+            overallActualHours: actualHours,
+            overallTargetHours: targetHours,
+            overallHoursTargetIsAvailable: targetHours > 0
         )
     }
 
@@ -428,9 +718,9 @@ enum ProgressCalculator {
             : remainingHours
     }
 
-    /// The date interval the menu bar aggregates over, clipped to the month.
+    /// The date interval a single-month aggregate covers, clipped to the month.
     static func periodInterval(
-        period: AggregationPeriod,
+        period: SingleMonthPeriod,
         month: YearMonth,
         timeZone: TimeZone,
         now: Date
@@ -440,11 +730,6 @@ enum ProgressCalculator {
         switch period {
         case .month:
             return monthInterval
-        case .week:
-            guard let week = calendar.dateInterval(of: .weekOfYear, for: now) else { return monthInterval }
-            let start = max(week.start, monthInterval.start)
-            let end = min(week.end, monthInterval.end)
-            return end > start ? DateInterval(start: start, end: end) : monthInterval
         case .day:
             guard let day = calendar.dateInterval(of: .day, for: now) else { return monthInterval }
             let start = max(day.start, monthInterval.start)

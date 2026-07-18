@@ -206,12 +206,12 @@ struct SettingsView: View {
             // Hero: the menu bar item itself — everything below configures it.
             SwiftUI.Section {
                 VStack(spacing: 10) {
-                    TimelineView(.periodic(from: .now, by: 60)) { context in
-                        MenuBarLabel(
-                            aggregate: appState.menuBarAggregate(at: context.date),
-                            settings: appState.displaySettings
-                        )
-                    }
+                    // Reads the shared displayNow clock via observation — the
+                    // preview and the real status item can never disagree.
+                    MenuBarLabel(
+                        aggregate: appState.menuBarAggregate,
+                        settings: appState.displaySettings
+                    )
                     // Leading equals the vertical padding so the overall
                     // ring stays concentric with the capsule's left cap.
                     .padding(.leading, appState.displaySettings.menuBarVisualization == .ring ? 9 : 18)

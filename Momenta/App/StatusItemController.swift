@@ -211,12 +211,13 @@ private struct MenuBarLabelContainer: View {
     @Environment(AppState.self) private var appState
 
     var body: some View {
-        TimelineView(.periodic(from: .now, by: 60)) { context in
-            MenuBarLabel(
-                aggregate: appState.menuBarAggregate(at: context.date),
-                settings: appState.displaySettings
-            )
-        }
+        // No local clock: the label re-renders when the shared displayNow (or
+        // any snapshot) changes, so it can never disagree with the popover
+        // about which day/week/month is current.
+        MenuBarLabel(
+            aggregate: appState.menuBarAggregate,
+            settings: appState.displaySettings
+        )
         // Ring mode: 2.5pt leading leaves the ring's 19pt visual circle the
         // same 1.5pt gap on the left as above and below inside the system's
         // 22pt menu bar capsule, keeping ring and capsule cap concentric.
