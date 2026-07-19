@@ -60,6 +60,9 @@ struct ClientCardView: View {
     }
 
     private var currencyCode: String { client.currency }
+    /// A fixed lane keeps the endpoint label out of both the data line and the
+    /// trailing axis without changing horizontal geometry near period end.
+    private var periodMarkerSlotWidth: CGFloat { 64 }
 
     // MARK: Body
 
@@ -166,7 +169,9 @@ struct ClientCardView: View {
     // MARK: Chart (month + week)
 
     private func periodChart(points: [DayProgressPoint], hasGoal: Bool, marker: String) -> some View {
+        precondition(!points.isEmpty, "Period charts require a complete date domain")
         let todayPoint = points.last(where: { $0.actualHours != nil })
+        let xDomain = points.first!.day...points.last!.day
         return Chart {
             if hasGoal {
                 // Color the variance only through the latest elapsed day; the
@@ -205,14 +210,25 @@ struct ClientCardView: View {
                 )
                 .symbolSize(36)
                 .foregroundStyle(clientColor)
-                .annotation(position: .trailing, alignment: .leading, spacing: 4) {
+                .annotation(
+                    position: .trailing,
+                    alignment: .leading,
+                    spacing: 4
+                ) {
                     Text(marker)
                         .font(.caption.weight(.bold).monospacedDigit())
                         .foregroundStyle(clientColor)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.75)
+                        .frame(width: periodMarkerSlotWidth - 8, alignment: .leading)
                 }
             }
         }
         .chartLegend(.hidden)
+        .chartXScale(
+            domain: xDomain,
+            range: .plotDimension(startPadding: 0, endPadding: periodMarkerSlotWidth)
+        )
         .chartXAxis {
             AxisMarks {
                 AxisValueLabel()
