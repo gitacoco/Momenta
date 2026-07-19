@@ -46,6 +46,10 @@ struct ClientCardView: View {
     }
 
     private var deltaColor: Color {
+        varianceColor(isAhead: isAhead)
+    }
+
+    private func varianceColor(isAhead: Bool) -> Color {
         switch (isAhead, colorScheme) {
         case (true, .light): Color(hex: "#24A148")
         case (true, .dark): Color(hex: "#42BE65")
@@ -169,72 +173,95 @@ struct ClientCardView: View {
         precondition(!points.isEmpty, "Period charts require a complete date domain")
         let todayPoint = points.last(where: { $0.actualHours != nil })
         let xDomain = points.first!.day...points.last!.day
-        return Chart {
-            if hasGoal {
-                // Color the variance only through the latest elapsed day; the
-                // planned line continues across the rest of the period.
-                ForEach(points.filter { $0.actualHours != nil }) { point in
-                    AreaMark(
-                        x: .value("Day", point.day),
-                        yStart: .value("Actual", value(actual: point)),
-                        yEnd: .value("Planned", value(planned: point))
-                    )
-                    .foregroundStyle(deltaColor.opacity(0.1))
+        let elapsedPoints = points.filter { $0.actualHours != nil }
+        let varianceSegments = PeriodChartLayout.varianceSegments(
+            samples: elapsedPoints.map {
+                PeriodChartLayout.Sample(
+                    day: $0.day,
+                    actual: value(actual: $0),
+                    planned: value(planned: $0)
+                )
+            }
+        )
+        return GeometryReader { proxy in
+            let tickDates = PeriodChartLayout.dateTicks(
+                days: points.map(\.day),
+                availableWidth: Double(proxy.size.width)
+            )
+            Chart {
+                if hasGoal {
+                    // Color the variance only through the latest elapsed day; the
+                    // planned line continues across the rest of the period. Each
+                    // series stops and restarts at an interpolated crossing so a
+                    // later final state cannot recolor an earlier interval.
+                    ForEach(varianceSegments) { segment in
+                        ForEach(segment.points, id: \.day) { point in
+                            AreaMark(
+                                x: .value("Day", point.day),
+                                yStart: .value("Actual", point.actual),
+                                yEnd: .value("Planned", point.planned),
+                                series: .value("Variance Segment", segment.id)
+                            )
+                            .foregroundStyle(
+                                varianceColor(isAhead: segment.state == .ahead).opacity(0.1)
+                            )
+                        }
+                    }
+                    ForEach(points) { point in
+                        LineMark(
+                            x: .value("Day", point.day),
+                            y: .value("Planned", value(planned: point)),
+                            series: .value("Series", "Planned")
+                        )
+                        .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 3]))
+                        .foregroundStyle(Color(nsColor: .tertiaryLabelColor))
+                    }
                 }
-                ForEach(points) { point in
+                ForEach(elapsedPoints) { point in
                     LineMark(
                         x: .value("Day", point.day),
-                        y: .value("Planned", value(planned: point)),
-                        series: .value("Series", "Planned")
+                        y: .value("Actual", value(actual: point)),
+                        series: .value("Series", "Actual")
                     )
-                    .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 3]))
-                    .foregroundStyle(Color(nsColor: .tertiaryLabelColor))
+                    .lineStyle(StrokeStyle(lineWidth: 2))
+                    .foregroundStyle(clientColor)
+                }
+                if let todayPoint {
+                    PointMark(
+                        x: .value("Today", todayPoint.day),
+                        y: .value("Actual", value(actual: todayPoint))
+                    )
+                    .symbolSize(36)
+                    .foregroundStyle(clientColor)
+                    .annotation(
+                        position: markerAnnotationPosition(for: todayPoint, hasGoal: hasGoal),
+                        alignment: .center,
+                        spacing: 4,
+                        overflowResolution: AnnotationOverflowResolution(
+                            x: .fit(to: .plot),
+                            y: .fit(to: .plot)
+                        )
+                    ) {
+                        Text(marker)
+                            .font(.caption.weight(.bold).monospacedDigit())
+                            .foregroundStyle(clientColor)
+                            .fixedSize(horizontal: true, vertical: false)
+                    }
                 }
             }
-            ForEach(points.filter { $0.actualHours != nil }) { point in
-                LineMark(
-                    x: .value("Day", point.day),
-                    y: .value("Actual", value(actual: point)),
-                    series: .value("Series", "Actual")
-                )
-                .lineStyle(StrokeStyle(lineWidth: 2))
-                .foregroundStyle(clientColor)
-            }
-            if let todayPoint {
-                PointMark(
-                    x: .value("Today", todayPoint.day),
-                    y: .value("Actual", value(actual: todayPoint))
-                )
-                .symbolSize(36)
-                .foregroundStyle(clientColor)
-                .annotation(
-                    position: markerAnnotationPosition(for: todayPoint, hasGoal: hasGoal),
-                    alignment: .center,
-                    spacing: 4,
-                    overflowResolution: AnnotationOverflowResolution(
-                        x: .fit(to: .plot),
-                        y: .fit(to: .plot)
-                    )
-                ) {
-                    Text(marker)
-                        .font(.caption.weight(.bold).monospacedDigit())
-                        .foregroundStyle(clientColor)
-                        .fixedSize(horizontal: true, vertical: false)
+            .chartLegend(.hidden)
+            .chartXScale(domain: xDomain)
+            .chartXAxis {
+                AxisMarks(values: tickDates) {
+                    AxisValueLabel(format: .dateTime.month(.abbreviated).day())
                 }
             }
-        }
-        .chartLegend(.hidden)
-        .chartXScale(domain: xDomain)
-        .chartXAxis {
-            AxisMarks {
-                AxisValueLabel()
-            }
-        }
-        .chartYAxis {
-            AxisMarks(position: .trailing) {
-                AxisGridLine()
-                AxisValueLabel()
-                    .foregroundStyle(Color(nsColor: .secondaryLabelColor))
+            .chartYAxis {
+                AxisMarks(position: .trailing) {
+                    AxisGridLine()
+                    AxisValueLabel()
+                        .foregroundStyle(Color(nsColor: .secondaryLabelColor))
+                }
             }
         }
     }
