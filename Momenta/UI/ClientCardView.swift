@@ -60,9 +60,6 @@ struct ClientCardView: View {
     }
 
     private var currencyCode: String { client.currency }
-    /// A fixed lane keeps the endpoint label out of both the data line and the
-    /// trailing axis without changing horizontal geometry near period end.
-    private var periodMarkerSlotWidth: CGFloat { 64 }
 
     // MARK: Body
 
@@ -211,24 +208,23 @@ struct ClientCardView: View {
                 .symbolSize(36)
                 .foregroundStyle(clientColor)
                 .annotation(
-                    position: .trailing,
-                    alignment: .leading,
-                    spacing: 4
+                    position: markerAnnotationPosition(for: todayPoint, hasGoal: hasGoal),
+                    alignment: .center,
+                    spacing: 4,
+                    overflowResolution: AnnotationOverflowResolution(
+                        x: .fit(to: .plot),
+                        y: .fit(to: .plot)
+                    )
                 ) {
                     Text(marker)
                         .font(.caption.weight(.bold).monospacedDigit())
                         .foregroundStyle(clientColor)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.75)
-                        .frame(width: periodMarkerSlotWidth - 8, alignment: .leading)
+                        .fixedSize(horizontal: true, vertical: false)
                 }
             }
         }
         .chartLegend(.hidden)
-        .chartXScale(
-            domain: xDomain,
-            range: .plotDimension(startPadding: 0, endPadding: periodMarkerSlotWidth)
-        )
+        .chartXScale(domain: xDomain)
         .chartXAxis {
             AxisMarks {
                 AxisValueLabel()
@@ -241,6 +237,16 @@ struct ClientCardView: View {
                     .foregroundStyle(Color(nsColor: .secondaryLabelColor))
             }
         }
+    }
+
+    /// At the period boundary the label has no horizontal escape route. Move
+    /// it vertically away from the planned line instead of changing X scale.
+    private func markerAnnotationPosition(
+        for point: DayProgressPoint,
+        hasGoal: Bool
+    ) -> AnnotationPosition {
+        guard hasGoal else { return .top }
+        return value(actual: point) <= value(planned: point) ? .bottom : .top
     }
 
     private func value(planned point: DayProgressPoint) -> Double {
