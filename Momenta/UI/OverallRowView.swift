@@ -56,9 +56,7 @@ struct OverallRowView: View {
                     }
                 }
                 .pickerStyle(.menu)
-                .buttonStyle(.plain)
                 .labelsHidden()
-                .controlSize(.small)
                 .fixedSize()
                 .accessibilityLabel("Overall period")
             }
