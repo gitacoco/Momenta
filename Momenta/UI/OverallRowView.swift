@@ -7,8 +7,17 @@ import SwiftUI
 struct OverallRowView: View {
     var aggregate: AggregateProgress
     var unit: DisplayUnit
-    /// Period phrase, e.g. "today", "this week", "July" (uppercased for display).
-    var label: String
+    var selectedPeriod: AggregationPeriod
+    var onSelectPeriod: (AggregationPeriod) -> Void
+
+    private var periodSelection: Binding<AggregationPeriod> {
+        Binding(
+            get: { selectedPeriod },
+            set: { newValue in
+                onSelectPeriod(newValue)
+            }
+        )
+    }
 
     private var fraction: Double {
         unit == .revenue ? aggregate.fraction : aggregate.hoursFraction
@@ -35,21 +44,46 @@ struct OverallRowView: View {
             OverallRingGlyph(fraction: isAvailable ? fraction : nil)
                 .frame(width: 20, height: 20)
 
-            Text("Overall \(label)")
-                .foregroundStyle(.secondary)
-                .font(.caption.weight(.semibold))
-                .textCase(.uppercase)
-                .lineLimit(1)
+            HStack(spacing: 3) {
+                Text("Overall")
+                    .textCase(.uppercase)
+                    .accessibilityHidden(true)
+
+                Picker("Overall period", selection: periodSelection) {
+                    ForEach(AggregationPeriod.allCases) { period in
+                        Text(period.overallPickerLabel)
+                            .tag(period)
+                    }
+                }
+                .pickerStyle(.menu)
+                .buttonStyle(.plain)
+                .labelsHidden()
+                .controlSize(.small)
+                .fixedSize()
+                .accessibilityLabel("Overall period")
+            }
+            .foregroundStyle(.secondary)
+            .font(.caption.weight(.semibold))
+            .lineLimit(1)
 
             Spacer(minLength: 8)
 
             Text("\(Text(actualText).foregroundStyle(.primary).fontWeight(.semibold))\(Text(" / \(targetText) · ").foregroundStyle(.secondary))\(Text(percentText).foregroundStyle(.primary).fontWeight(.semibold))")
                 .font(.caption.monospacedDigit())
                 .lineLimit(1)
+                .accessibilityLabel("\(percentText), \(actualText) of \(targetText)")
         }
         .padding(.horizontal, 4)
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("Overall \(label), \(percentText), \(actualText) of \(targetText)")
+    }
+}
+
+private extension AggregationPeriod {
+    var overallPickerLabel: String {
+        switch self {
+        case .day: "Today"
+        case .week: "This Week"
+        case .month: "This Month"
+        }
     }
 }
 

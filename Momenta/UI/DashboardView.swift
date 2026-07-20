@@ -41,24 +41,6 @@ struct DashboardView: View {
         }
     }
 
-    /// Period phrase for the Overall row: "today"/date, "this week"/range, or
-    /// the month name — matching the current period and reference.
-    private var overallLabel: String {
-        switch appState.displaySettings.aggregationPeriod {
-        case .day:
-            return appState.isReferenceCurrentDay
-                ? "today"
-                : Format.dayShort(appState.activeReference, timeZone: appState.timeZone)
-        case .week:
-            // A stored reference ⇒ a historical week; nil follows now.
-            return appState.selectedReference == nil
-                ? "this week"
-                : Format.weekRange(appState.activeReference, timeZone: appState.timeZone)
-        case .month:
-            return Format.monthName(appState.selectedMonth, timeZone: appState.timeZone)
-        }
-    }
-
     private var header: some View {
         @Bindable var appState = appState
         return HStack(spacing: 8) {
@@ -133,7 +115,14 @@ struct DashboardView: View {
                         OverallRowView(
                             aggregate: overall,
                             unit: appState.displayUnit,
-                            label: overallLabel
+                            selectedPeriod: period,
+                            onSelectPeriod: { selectedPeriod in
+                                if selectedPeriod == appState.displaySettings.aggregationPeriod {
+                                    appState.resetReferenceToNow()
+                                } else {
+                                    appState.displaySettings.aggregationPeriod = selectedPeriod
+                                }
+                            }
                         )
                         .padding(.top, 2)
                     }
