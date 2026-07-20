@@ -528,8 +528,78 @@ struct ProgressCalculatorTests {
         // Weekends add no planned progress under weekday pacing.
         #expect(slice.points[5].plannedHours == slice.points[4].plannedHours) // Sat 18 flat
         #expect(slice.points[6].plannedHours == slice.points[5].plannedHours) // Sun 19 flat
-        // Full-week plan: 5 weekdays × 2h.
-        #expect(slice.targetHours == 10)
+        // Only 5h was completed before Monday. The remaining 41h is spread
+        // across the 15 weekdays from Jul 13 through month end, so this week's
+        // frozen catch-up target is 41 / 15 × 5 rather than the static 10h.
+        #expect(abs(((slice.targetHours ?? 0) - Decimal(41) / Decimal(3)).doubleValue) < 0.000_001)
+        #expect(abs(((slice.plannedToDateHours ?? 0) - Decimal(41) / Decimal(5)).doubleValue) < 0.000_001)
+        #expect(abs(((slice.deltaHours ?? 0) - Decimal(4) / Decimal(5)).doubleValue) < 0.000_001)
+    }
+
+    @Test func weeklyCatchUpCarriesEarlierShortfallThroughRemainingWeeks() {
+        let goal = MonthlyGoal(hourlyRate: 100, input: .hours(46))
+        let config = client(pacing: .weekdays, goal: goal)
+        let entries = [
+            // Only 10h completed before Jul 13, versus the original 16h pace.
+            TimeEntry(id: 1, clientID: 1, start: date(day: 6, hour: 8), stop: date(day: 6, hour: 18)),
+            // Then follow the catch-up target exactly in each remaining week.
+            TimeEntry(id: 2, clientID: 1, start: date(day: 13, hour: 8), stop: date(day: 13, hour: 20)),
+            TimeEntry(id: 3, clientID: 1, start: date(day: 20, hour: 8), stop: date(day: 20, hour: 20)),
+            TimeEntry(id: 4, clientID: 1, start: date(day: 27, hour: 8), stop: date(day: 27, hour: 20)),
+        ]
+        let progress = ProgressCalculator.progress(
+            for: config, entries: entries, month: july, timeZone: utc, now: date(day: 31, hour: 23)
+        )!
+
+        func target(for day: Int) -> Decimal? {
+            ProgressCalculator.weekSlice(
+                client: config,
+                progressByMonth: [july: progress],
+                reference: date(day: day, hour: 12),
+                timeZone: utc
+            ).targetHours
+        }
+
+        // At Jul 13, 36h remains across 15 weekdays: 12h per five-day week.
+        // Meeting each frozen target keeps the later targets at 12h and lands
+        // exactly on the 46h monthly goal.
+        #expect(target(for: 13) == 12)
+        #expect(target(for: 20) == 12)
+        #expect(target(for: 27) == 12)
+        #expect(progress.actualHours == 46)
+    }
+
+    @Test func weeklyCatchUpTargetIsFrozenAgainstWorkInsideTheWeek() {
+        let goal = MonthlyGoal(hourlyRate: 100, input: .hours(46))
+        let config = client(pacing: .weekdays, goal: goal)
+        let beforeOnly = [
+            TimeEntry(id: 1, clientID: 1, start: date(day: 6, hour: 8), stop: date(day: 6, hour: 18)),
+        ]
+        let withCurrentWeek = beforeOnly + [
+            TimeEntry(id: 2, clientID: 1, start: date(day: 13, hour: 8), stop: date(day: 13, hour: 20)),
+        ]
+        let beforeProgress = ProgressCalculator.progress(
+            for: config, entries: beforeOnly, month: july, timeZone: utc, now: date(day: 15, hour: 23)
+        )!
+        let currentProgress = ProgressCalculator.progress(
+            for: config, entries: withCurrentWeek, month: july, timeZone: utc, now: date(day: 15, hour: 23)
+        )!
+
+        let beforeTarget = ProgressCalculator.weekSlice(
+            client: config,
+            progressByMonth: [july: beforeProgress],
+            reference: date(day: 15),
+            timeZone: utc
+        ).targetHours
+        let currentTarget = ProgressCalculator.weekSlice(
+            client: config,
+            progressByMonth: [july: currentProgress],
+            reference: date(day: 15),
+            timeZone: utc
+        ).targetHours
+
+        #expect(beforeTarget == 12)
+        #expect(currentTarget == beforeTarget)
     }
 
     @Test func weekSliceStitchesAcrossMonthBoundary() {
@@ -693,6 +763,32 @@ struct ProgressCalculatorTests {
         #expect(ProgressCalculator.weekAggregate(slices: [slice]) == nil)
     }
 
+    @Test func completedMonthlyGoalMakesZeroCatchUpWeekComplete() {
+        let goal = MonthlyGoal(hourlyRate: 100, input: .hours(10))
+        let config = client(pacing: .weekdays, goal: goal)
+        let entries = [
+            TimeEntry(id: 1, clientID: 1, start: date(day: 6, hour: 8), stop: date(day: 6, hour: 18)),
+        ]
+        let progress = ProgressCalculator.progress(
+            for: config, entries: entries, month: july, timeZone: utc, now: date(day: 15, hour: 12)
+        )!
+        let slice = ProgressCalculator.weekSlice(
+            client: config,
+            progressByMonth: [july: progress],
+            reference: date(day: 15),
+            timeZone: utc
+        )
+        let aggregate = ProgressCalculator.weekAggregate(slices: [slice])!
+
+        #expect(slice.hasGoal)
+        #expect(slice.targetHours == 0)
+        #expect(slice.targetRevenue == 0)
+        #expect(aggregate.targetIsAvailable)
+        #expect(aggregate.hoursTargetIsAvailable)
+        #expect(aggregate.fraction == 1)
+        #expect(aggregate.hoursFraction == 1)
+    }
+
     @Test func forwardStraddleWeekIncludesSynthesizedNextMonthPlanned() {
         // The week of Mon July 27 – Sun Aug 2 straddles forward. August's
         // progress is synthesized locally: empty entries, planned line from
@@ -725,17 +821,18 @@ struct ProgressCalculatorTests {
         func expectClose(_ value: Decimal?, _ expected: Decimal) {
             #expect(value != nil && abs(((value ?? 0) - expected).doubleValue) < 0.000_001)
         }
-        // Full-week target: Jul 27–31 at 1h/day + Aug 1–2 at 1h/day (August
-        // inherits the 31h goal over its 31 days).
-        expectClose(slice.targetHours, 7)
-        expectClose(slice.targetRevenue, 700)
+        // At the Jul 27 freeze no July work existed, so all 31h remaining are
+        // assigned across Jul 27–31. August starts a new monthly segment and
+        // contributes its normal first two calendar days at 1h/day.
+        expectClose(slice.targetHours, 33)
+        expectClose(slice.targetRevenue, 3_300)
         // August days chart planned but stay non-elapsed.
         #expect(slice.points[5].actualHours == nil) // Sat Aug 1
         #expect(slice.points[6].actualHours == nil) // Sun Aug 2
-        expectClose(slice.points[6].plannedHours, 7)
+        expectClose(slice.points[6].plannedHours, 33)
         // Actuals stop at the last elapsed July day.
         #expect(slice.actualHours == 2)
-        expectClose(slice.plannedToDateHours, 5) // Mon–Fri planned by July 31
+        expectClose(slice.plannedToDateHours, 31) // July remainder due by Jul 31
     }
 }
 

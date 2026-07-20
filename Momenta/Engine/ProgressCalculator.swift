@@ -148,8 +148,9 @@ struct ClientPeriodSlice: Identifiable, Sendable {
     var actualHours: Decimal
     var actualRevenue: Decimal
 
-    /// Period target — day: catch-up pace; week: the full-week planned slice;
-    /// month: the whole-month goal. Nil without a goal.
+    /// Period target — day: catch-up pace; week: the catch-up target frozen at
+    /// the start of each month segment in the week; month: the whole-month
+    /// goal. Nil without a goal.
     var targetHours: Decimal?
     var targetRevenue: Decimal?
 
@@ -502,8 +503,13 @@ enum ProgressCalculator {
     }
 
     /// The week card: a true Monday–Sunday cumulative series, stitched across a
-    /// month boundary from each day's own month progress. `progressByMonth`
-    /// holds this client's progress for every month the week touches.
+    /// month boundary from each day's own month progress. The planned pace is
+    /// frozen at the beginning of each month segment in the week: remaining
+    /// monthly hours after actuals strictly before that boundary are spread
+    /// over the month's remaining scheduled days. Earlier shortfalls therefore
+    /// raise later weekly targets without making the current target move while
+    /// work is logged. `progressByMonth` holds this client's progress for every
+    /// month the week touches.
     static func weekSlice(
         client: ClientConfig,
         progressByMonth: [YearMonth: ClientProgress],
@@ -526,6 +532,8 @@ enum ProgressCalculator {
         var actualToDateRevenue: Decimal = 0
         var plannedToDateHours: Decimal?
         var plannedToDateRevenue: Decimal?
+        var catchUpHoursPerScheduledDay: [YearMonth: Decimal] = [:]
+        var scheduledWeightsByMonth: [YearMonth: [Int]] = [:]
 
         for offset in 0..<7 {
             guard let dayStart = calendar.date(byAdding: .day, value: offset, to: weekStart) else { continue }
@@ -540,10 +548,38 @@ enum ProgressCalculator {
             if let progress, let dayIndex {
                 rate = progress.hourlyRate
                 let point = progress.points[dayIndex]
-                let previousPlanned = dayIndex > 0 ? progress.points[dayIndex - 1].plannedHours : 0
-                if let planned = point.plannedHours {
-                    dailyPlannedHours = planned - (previousPlanned ?? 0)
+                if let goal = progress.goal {
                     hasGoal = true
+                    let weights = scheduledWeightsByMonth[dayMonth] ?? dailyWeights(
+                        month: dayMonth,
+                        pacing: client.pacing,
+                        timeZone: timeZone
+                    )
+                    scheduledWeightsByMonth[dayMonth] = weights
+                    let catchUpHours = catchUpHoursPerScheduledDay[dayMonth] ?? {
+                        let segmentStart = max(weekStart, dayMonth.start(in: timeZone))
+                        let segmentStartIndex = max(
+                            0,
+                            calendar.dateComponents(
+                                [.day],
+                                from: dayMonth.start(in: timeZone),
+                                to: segmentStart
+                            ).day ?? 0
+                        )
+                        let actualBeforeSegment = progress.points
+                            .prefix(segmentStartIndex)
+                            .compactMap(\.actualHours)
+                            .last ?? 0
+                        let remainingHours = max(0, goal.hours - actualBeforeSegment)
+                        let remainingWeight = weights
+                            .dropFirst(segmentStartIndex)
+                            .reduce(0, +)
+                        return remainingWeight > 0
+                            ? remainingHours / Decimal(remainingWeight)
+                            : 0
+                    }()
+                    catchUpHoursPerScheduledDay[dayMonth] = catchUpHours
+                    dailyPlannedHours = catchUpHours * Decimal(weights[dayIndex])
                 }
                 if let actual = point.actualHours {
                     let previousActual = dayIndex > 0 ? (progress.points[dayIndex - 1].actualHours ?? 0) : 0
@@ -601,7 +637,8 @@ enum ProgressCalculator {
             AggregateProgress.ClientShare(
                 client: slice.client,
                 actualRevenue: slice.actualRevenue,
-                targetRevenue: slice.targetRevenue ?? 0
+                targetRevenue: slice.targetRevenue ?? 0,
+                targetIsAvailable: true
             )
         }
         let actualHours = contributing.reduce(Decimal(0)) { $0 + $1.actualHours }
@@ -612,10 +649,10 @@ enum ProgressCalculator {
             shares: shares,
             overallActualRevenue: actualRevenue,
             overallTargetRevenue: targetRevenue,
-            overallTargetIsAvailable: targetRevenue > 0,
+            overallTargetIsAvailable: true,
             overallActualHours: actualHours,
             overallTargetHours: targetHours,
-            overallHoursTargetIsAvailable: targetHours > 0
+            overallHoursTargetIsAvailable: true
         )
     }
 
