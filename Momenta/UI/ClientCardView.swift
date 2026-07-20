@@ -398,13 +398,6 @@ struct ClientCardView: View {
                     }
                 }
                 .frame(height: 24)
-                HStack {
-                    Text("0")
-                    Spacer()
-                    Text(unitText(hours: targetHours, revenue: slice.targetRevenue ?? 0))
-                }
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
 
                 dayMetrics(slice, targetHours: targetHours)
                     .padding(.top, 6)
