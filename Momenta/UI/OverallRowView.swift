@@ -3,7 +3,7 @@ import SwiftUI
 /// The popover's Overall summary row, pinned above the client cards for every
 /// period. It follows the h/$ toggle: revenue mode mirrors the menu-bar Overall
 /// exactly (same `AggregateProgress`), while hours mode shows summed hours. The
-/// ring encodes the same fraction shown numerically beside the label.
+/// ring encodes the same fraction shown after the trailing actual/target pair.
 struct OverallRowView: View {
     var aggregate: AggregateProgress
     var unit: DisplayUnit
@@ -35,16 +35,15 @@ struct OverallRowView: View {
             OverallRingGlyph(fraction: isAvailable ? fraction : nil)
                 .frame(width: 20, height: 20)
 
-            (Text("Overall \(label) · ").foregroundStyle(.secondary)
-                + Text(percentText).foregroundStyle(.primary))
+            Text("Overall \(label)")
+                .foregroundStyle(.secondary)
                 .font(.caption.weight(.semibold))
                 .textCase(.uppercase)
                 .lineLimit(1)
 
             Spacer(minLength: 8)
 
-            (Text(actualText).foregroundStyle(.primary).fontWeight(.semibold)
-                + Text(" / \(targetText)").foregroundStyle(.secondary))
+            Text("\(Text(actualText).foregroundStyle(.primary).fontWeight(.semibold))\(Text(" / \(targetText) · ").foregroundStyle(.secondary))\(Text(percentText).foregroundStyle(.primary).fontWeight(.semibold))")
                 .font(.caption.monospacedDigit())
                 .lineLimit(1)
         }
