@@ -47,6 +47,7 @@ struct OverallRowView: View {
             HStack(spacing: 3) {
                 Text("Overall")
                     .textCase(.uppercase)
+                    .fixedSize(horizontal: true, vertical: false)
                     .accessibilityHidden(true)
 
                 Picker("Overall period", selection: periodSelection) {
