@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 /// The popover's Overall summary row, pinned above the client cards for every
@@ -50,16 +51,10 @@ struct OverallRowView: View {
                     .fixedSize(horizontal: true, vertical: false)
                     .accessibilityHidden(true)
 
-                Picker("Overall period", selection: periodSelection) {
-                    ForEach(AggregationPeriod.allCases) { period in
-                        Text(period.overallPickerLabel)
-                            .tag(period)
-                    }
-                }
-                .pickerStyle(.menu)
-                .labelsHidden()
+                OverallPeriodPullDown(selection: periodSelection)
                 .fixedSize()
                 .accessibilityLabel("Overall period")
+                .accessibilityValue(selectedPeriod.overallPickerLabel)
             }
             .foregroundStyle(.secondary)
             .font(.caption.weight(.semibold))
@@ -82,6 +77,73 @@ private extension AggregationPeriod {
         case .day: "Today"
         case .week: "This Week"
         case .month: "This Month"
+        }
+    }
+}
+
+/// A native pull-down button rather than a pop-up picker. AppKit presents a
+/// pull-down menu from the requested edge; a pop-up always aligns its selected
+/// item with the control, which makes `This Month` expand mostly upward.
+private struct OverallPeriodPullDown: NSViewRepresentable {
+    @Binding var selection: AggregationPeriod
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(selection: $selection)
+    }
+
+    func makeNSView(context: Context) -> NSPopUpButton {
+        let menu = NSMenu()
+        menu.autoenablesItems = false
+
+        for (index, period) in AggregationPeriod.allCases.enumerated() {
+            let item = NSMenuItem(
+                title: period.overallPickerLabel,
+                action: #selector(Coordinator.selectPeriod(_:)),
+                keyEquivalent: ""
+            )
+            item.tag = index
+            item.target = context.coordinator
+            menu.addItem(item)
+        }
+
+        let button = NSPopUpButton(
+            title: selection.overallPickerLabel,
+            pullDownMenu: menu
+        )
+        button.preferredEdge = .minY
+        button.setAccessibilityLabel("Overall period")
+        update(button, coordinator: context.coordinator)
+        return button
+    }
+
+    func updateNSView(_ button: NSPopUpButton, context: Context) {
+        context.coordinator.selection = $selection
+        update(button, coordinator: context.coordinator)
+    }
+
+    private func update(_ button: NSPopUpButton, coordinator: Coordinator) {
+        button.title = selection.overallPickerLabel
+        button.setAccessibilityValue(selection.overallPickerLabel)
+
+        for (index, item) in button.itemArray.enumerated() {
+            item.target = coordinator
+            item.state = index == AggregationPeriod.allCases.firstIndex(of: selection) ? .on : .off
+        }
+
+        button.invalidateIntrinsicContentSize()
+    }
+
+    @MainActor
+    final class Coordinator: NSObject {
+        var selection: Binding<AggregationPeriod>
+
+        init(selection: Binding<AggregationPeriod>) {
+            self.selection = selection
+        }
+
+        @objc func selectPeriod(_ sender: NSMenuItem) {
+            guard AggregationPeriod.allCases.indices.contains(sender.tag) else { return }
+            selection.wrappedValue = AggregationPeriod.allCases[sender.tag]
         }
     }
 }
