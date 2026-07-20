@@ -122,17 +122,18 @@ private struct OverallPeriodPullDown: NSViewRepresentable {
     }
 
     private func update(_ button: NSPopUpButton, coordinator: Coordinator) {
-        let title = selection.overallPickerLabel
+        let accessibilityTitle = selection.overallPickerLabel
+        let displayTitle = accessibilityTitle.uppercased()
         let captionSize = NSFont.preferredFont(forTextStyle: .caption1).pointSize
         let font = NSFont.systemFont(ofSize: captionSize, weight: .semibold)
         let styledTitle = NSAttributedString(
-            string: title,
+            string: displayTitle,
             attributes: [
                 .font: font,
                 .foregroundColor: NSColor.secondaryLabelColor,
             ]
         )
-        button.title = title
+        button.title = displayTitle
         button.font = font
         if let cell = button.cell as? NSPopUpButtonCell {
             let displayItem = cell.menuItem ?? NSMenuItem()
@@ -140,7 +141,7 @@ private struct OverallPeriodPullDown: NSViewRepresentable {
             cell.menuItem = displayItem
             cell.needsSizing = true
         }
-        button.setAccessibilityValue(selection.overallPickerLabel)
+        button.setAccessibilityValue(accessibilityTitle)
 
         for (index, item) in button.itemArray.enumerated() {
             item.target = coordinator
