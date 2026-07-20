@@ -45,16 +45,16 @@ struct OverallRowView: View {
             OverallRingGlyph(fraction: isAvailable ? fraction : nil)
                 .frame(width: 20, height: 20)
 
-            HStack(spacing: 3) {
+            HStack(spacing: 8) {
                 Text("Overall")
                     .textCase(.uppercase)
                     .fixedSize(horizontal: true, vertical: false)
                     .accessibilityHidden(true)
 
                 OverallPeriodPullDown(selection: periodSelection)
-                .fixedSize()
-                .accessibilityLabel("Overall period")
-                .accessibilityValue(selectedPeriod.overallPickerLabel)
+                    .fixedSize()
+                    .accessibilityLabel("Overall period")
+                    .accessibilityValue(selectedPeriod.overallPickerLabel)
             }
             .foregroundStyle(.secondary)
             .font(.caption.weight(.semibold))
@@ -122,7 +122,24 @@ private struct OverallPeriodPullDown: NSViewRepresentable {
     }
 
     private func update(_ button: NSPopUpButton, coordinator: Coordinator) {
-        button.title = selection.overallPickerLabel
+        let title = selection.overallPickerLabel
+        let captionSize = NSFont.preferredFont(forTextStyle: .caption1).pointSize
+        let font = NSFont.systemFont(ofSize: captionSize, weight: .semibold)
+        let styledTitle = NSAttributedString(
+            string: title,
+            attributes: [
+                .font: font,
+                .foregroundColor: NSColor.secondaryLabelColor,
+            ]
+        )
+        button.title = title
+        button.font = font
+        if let cell = button.cell as? NSPopUpButtonCell {
+            let displayItem = cell.menuItem ?? NSMenuItem()
+            displayItem.attributedTitle = styledTitle
+            cell.menuItem = displayItem
+            cell.needsSizing = true
+        }
         button.setAccessibilityValue(selection.overallPickerLabel)
 
         for (index, item) in button.itemArray.enumerated() {
