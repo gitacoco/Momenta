@@ -50,7 +50,12 @@ final class StatusItemController: NSObject {
     // MARK: Interactions
 
     @objc private func handleClick() {
-        guard let event = NSApp.currentEvent else { return }
+        guard let event = NSApp.currentEvent else {
+            // Accessibility's AXPress action has no backing NSEvent and is
+            // equivalent to the status item's primary click.
+            togglePopover()
+            return
+        }
         if event.type == .rightMouseUp {
             showContextMenu(with: event)
         } else if event.type == .leftMouseUp {
