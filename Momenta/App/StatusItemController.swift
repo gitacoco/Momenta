@@ -10,6 +10,7 @@ final class StatusItemController: NSObject {
     private let appState: AppState
     private let statusItem: NSStatusItem
     private let popover: NSPopover
+    private var isWaitingToShowPopover = false
 
     init(appState: AppState) {
         self.appState = appState
@@ -45,6 +46,17 @@ final class StatusItemController: NSObject {
             button.action = #selector(handleClick)
             button.sendAction(on: [.leftMouseUp, .rightMouseUp])
         }
+
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(applicationDidBecomeActive),
+            name: NSApplication.didBecomeActiveNotification,
+            object: NSApp
+        )
+    }
+
+    deinit {
+        NotificationCenter.default.removeObserver(self)
     }
 
     // MARK: Interactions
@@ -65,12 +77,57 @@ final class StatusItemController: NSObject {
 
     private func togglePopover() {
         if popover.isShown {
+            isWaitingToShowPopover = false
+            popover.contentViewController?.view.window?.ignoresMouseEvents = false
             popover.performClose(nil)
-        } else if let button = statusItem.button {
-            popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
-            popover.contentViewController?.view.window?.makeKey()
+        } else if isWaitingToShowPopover {
+            // A second status-item click before activation completes cancels
+            // the pending open just like a click on an already-visible popover.
+            isWaitingToShowPopover = false
+            popover.contentViewController?.view.window?.ignoresMouseEvents = false
+            popover.performClose(nil)
+        } else if NSApp.isActive {
+            showPopover()
+        } else {
+            // An LSUIElement app needs a window before activation can succeed.
+            // Create the popover, but keep it out of mouse handling until the
+            // activation notification makes its window safe for menu tracking.
+            beginPopoverActivation()
+        }
+    }
+
+    private func beginPopoverActivation() {
+        guard let button = statusItem.button else { return }
+        isWaitingToShowPopover = true
+        popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+        let window = popover.contentViewController?.view.window
+        window?.ignoresMouseEvents = true
+        if NSApp.isActive {
+            finishPopoverActivation()
+        } else {
             NSApp.activate()
         }
+    }
+
+    @objc private func applicationDidBecomeActive() {
+        guard isWaitingToShowPopover else { return }
+        finishPopoverActivation()
+    }
+
+    private func finishPopoverActivation() {
+        precondition(NSApp.isActive, "Popover activation must finish in an active app")
+        isWaitingToShowPopover = false
+        let window = popover.contentViewController?.view.window
+        window?.ignoresMouseEvents = false
+        window?.makeKey()
+    }
+
+    private func showPopover() {
+        precondition(NSApp.isActive, "Popover must be shown only after app activation")
+        guard let button = statusItem.button else { return }
+        popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+        let window = popover.contentViewController?.view.window
+        window?.makeKey()
     }
 
     private func showContextMenu(with event: NSEvent) {
