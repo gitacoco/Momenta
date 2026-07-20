@@ -35,7 +35,7 @@ struct MenuBarPresentation: Equatable, Sendable {
     var clients: [ProgressObject]
     var overallPercentageText: String?
 
-    init(aggregate: AggregateProgress?, settings: DisplaySettings) {
+    init(aggregate: AggregateProgress?, settings: DisplaySettings, unit: DisplayUnit) {
         objectMode = settings.menuBarObjectMode
         visualization = settings.menuBarVisualization
         period = settings.aggregationPeriod
@@ -47,11 +47,17 @@ struct MenuBarPresentation: Equatable, Sendable {
             return
         }
 
+        let aggregateFraction: Double? = switch unit {
+        case .revenue:
+            aggregate.targetIsAvailable ? aggregate.fraction : nil
+        case .hours:
+            aggregate.hoursTargetIsAvailable ? aggregate.hoursFraction : nil
+        }
         let aggregateObject = ProgressObject(
             id: "aggregation",
             name: "Overall",
             monogram: nil,
-            fraction: aggregate.targetIsAvailable ? aggregate.fraction : nil
+            fraction: aggregateFraction
         )
         let clientObjects = aggregate.shares.map { share in
             let name = share.client.displayName
@@ -105,9 +111,10 @@ struct MenuBarPresentation: Equatable, Sendable {
 struct MenuBarLabel: View {
     var aggregate: AggregateProgress?
     var settings: DisplaySettings
+    var unit: DisplayUnit
 
     var body: some View {
-        let presentation = MenuBarPresentation(aggregate: aggregate, settings: settings)
+        let presentation = MenuBarPresentation(aggregate: aggregate, settings: settings, unit: unit)
 
         HStack(spacing: 6) {
             if presentation.isEmpty {

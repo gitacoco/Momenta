@@ -210,7 +210,8 @@ struct SettingsView: View {
                     // preview and the real status item can never disagree.
                     MenuBarLabel(
                         aggregate: appState.menuBarAggregate,
-                        settings: appState.displaySettings
+                        settings: appState.displaySettings,
+                        unit: appState.displayUnit
                     )
                     // Leading equals the vertical padding so the overall
                     // ring stays concentric with the capsule's left cap.

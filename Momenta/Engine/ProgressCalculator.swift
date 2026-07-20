@@ -37,10 +37,10 @@ struct ClientProgress: Identifiable, Sendable {
 }
 
 /// Cross-client aggregate for the menu bar and the popover Overall row.
-/// Revenue is the canonical cross-client unit (rates differ, so hours cannot be
-/// meaningfully summed). The parallel hours totals exist only for the popover's
-/// hours-mode Overall, where the user opted into a summed-hours view; the menu
-/// bar ignores them and stays revenue-only.
+/// Revenue and hours are both retained so the shared display-unit toggle can
+/// choose the Overall calculation used by the popover and menu bar. Revenue
+/// remains the cross-client financial view; hours is the explicit summed-hours
+/// view.
 struct AggregateProgress: Sendable {
     struct ClientShare: Identifiable, Sendable {
         var client: ClientConfig
@@ -95,8 +95,7 @@ struct AggregateProgress: Sendable {
         return (actualRevenue / targetRevenue).doubleValue
     }
 
-    /// Summed actual/target hours across clients. Only populated for the popover
-    /// Overall row; the menu bar never reads these.
+    /// Summed actual/target hours across clients for the hours-mode Overall.
     var actualHours: Decimal { overallActualHoursValue ?? 0 }
 
     var targetHours: Decimal { overallTargetHoursValue ?? 0 }

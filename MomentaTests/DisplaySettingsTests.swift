@@ -167,7 +167,8 @@ struct MenuBarPresentationTests {
 
                     let presentation = MenuBarPresentation(
                         aggregate: aggregate,
-                        settings: settings
+                        settings: settings,
+                        unit: .revenue
                     )
 
                     #expect(presentation.objectMode == mode)
@@ -208,7 +209,7 @@ struct MenuBarPresentationTests {
         var settings = DisplaySettings()
         settings.menuBarObjectMode = .both
 
-        let presentation = MenuBarPresentation(aggregate: progress, settings: settings)
+        let presentation = MenuBarPresentation(aggregate: progress, settings: settings, unit: .revenue)
 
         #expect(presentation.aggregation?.fraction == 1.75)
         #expect(presentation.clients[0].fraction == 1.5)
@@ -221,16 +222,37 @@ struct MenuBarPresentationTests {
         var settings = DisplaySettings()
         settings.menuBarObjectMode = .both
 
-        var presentation = MenuBarPresentation(aggregate: aggregate, settings: settings)
+        var presentation = MenuBarPresentation(aggregate: aggregate, settings: settings, unit: .revenue)
         #expect(presentation.overallPercentageText == nil)
 
         settings.showsOverallPercentage = true
-        presentation = MenuBarPresentation(aggregate: aggregate, settings: settings)
+        presentation = MenuBarPresentation(aggregate: aggregate, settings: settings, unit: .revenue)
         #expect(presentation.overallPercentageText == "62%")
 
         settings.menuBarObjectMode = .split
-        presentation = MenuBarPresentation(aggregate: aggregate, settings: settings)
+        presentation = MenuBarPresentation(aggregate: aggregate, settings: settings, unit: .revenue)
         #expect(presentation.overallPercentageText == nil)
+    }
+
+    @Test func overallFollowsTheSharedDisplayUnit() {
+        let progress = AggregateProgress(
+            shares: aggregate.shares,
+            overallActualHours: 10,
+            overallTargetHours: 40,
+            overallHoursTargetIsAvailable: true
+        )
+        var settings = DisplaySettings()
+        settings.menuBarObjectMode = .both
+        settings.showsOverallPercentage = true
+
+        let revenue = MenuBarPresentation(aggregate: progress, settings: settings, unit: .revenue)
+        let hours = MenuBarPresentation(aggregate: progress, settings: settings, unit: .hours)
+
+        #expect(revenue.aggregation?.fraction == 0.625)
+        #expect(revenue.overallPercentageText == "62%")
+        #expect(hours.aggregation?.fraction == 0.25)
+        #expect(hours.overallPercentageText == "25%")
+        #expect(hours.clients.map(\.fraction) == [0.5, 0.75])
     }
 
     @Test func completedZeroPaceRendersAsFullProgress() {
@@ -246,7 +268,7 @@ struct MenuBarPresentationTests {
         var settings = DisplaySettings()
         settings.menuBarObjectMode = .both
 
-        let presentation = MenuBarPresentation(aggregate: progress, settings: settings)
+        let presentation = MenuBarPresentation(aggregate: progress, settings: settings, unit: .revenue)
 
         #expect(presentation.aggregation?.fraction == 1)
         #expect(presentation.clients[0].fraction == 1)
@@ -255,7 +277,8 @@ struct MenuBarPresentationTests {
     @Test func missingProgressProducesOneNeutralState() {
         let presentation = MenuBarPresentation(
             aggregate: AggregateProgress(shares: []),
-            settings: DisplaySettings()
+            settings: DisplaySettings(),
+            unit: .hours
         )
 
         #expect(presentation.isEmpty)

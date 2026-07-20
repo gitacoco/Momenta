@@ -223,7 +223,8 @@ private struct MenuBarLabelContainer: View {
         // about which day/week/month is current.
         MenuBarLabel(
             aggregate: appState.menuBarAggregate,
-            settings: appState.displaySettings
+            settings: appState.displaySettings,
+            unit: appState.displayUnit
         )
         // Ring mode: 2.5pt leading leaves the ring's 19pt visual circle the
         // same 1.5pt gap on the left as above and below inside the system's
