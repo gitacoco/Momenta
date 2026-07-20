@@ -43,15 +43,15 @@ final class StatusItemController: NSObject {
             ])
             button.target = self
             button.action = #selector(handleClick)
-            button.sendAction(on: [.leftMouseUp, .rightMouseUp])
+            button.sendAction(on: [.leftMouseUp, .rightMouseDown])
         }
     }
 
     // MARK: Interactions
 
     @objc private func handleClick() {
-        if NSApp.currentEvent?.type == .rightMouseUp {
-            showContextMenu()
+        if let event = NSApp.currentEvent, event.type == .rightMouseDown {
+            showContextMenu(with: event)
         } else {
             togglePopover()
         }
@@ -67,7 +67,7 @@ final class StatusItemController: NSObject {
         }
     }
 
-    private func showContextMenu() {
+    private func showContextMenu(with event: NSEvent) {
         let menu = NSMenu()
 
         let settings = NSMenuItem(title: "Settings…", action: #selector(openSettingsAction), keyEquivalent: ",")
@@ -92,11 +92,11 @@ final class StatusItemController: NSObject {
         menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "Quit Momenta", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
 
-        // Assign temporarily so the click shows the menu, then detach so the
-        // next left click reaches our action instead of the menu.
-        statusItem.menu = menu
-        statusItem.button?.performClick(nil)
-        statusItem.menu = nil
+        guard let button = statusItem.button else { return }
+        // Begin tracking from the original right-mouse-down so AppKit consumes
+        // its matching mouse-up. Starting a second, simulated click from the
+        // mouse-up can immediately end the first menu tracking session.
+        NSMenu.popUpContextMenu(menu, with: event, for: button)
     }
 
     private func progressMenuItem() -> NSMenuItem {
