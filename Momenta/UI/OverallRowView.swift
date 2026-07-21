@@ -1,4 +1,3 @@
-import AppKit
 import SwiftUI
 
 /// The popover's Overall summary row, pinned above the client cards for every
@@ -51,10 +50,8 @@ struct OverallRowView: View {
                     .fixedSize(horizontal: true, vertical: false)
                     .accessibilityHidden(true)
 
-                OverallPeriodPullDown(selection: periodSelection)
+                OverallPeriodCycleButton(selection: periodSelection)
                     .fixedSize()
-                    .accessibilityLabel("Overall period")
-                    .accessibilityValue(selectedPeriod.overallPickerLabel)
             }
             .foregroundStyle(.secondary)
             .font(.caption.weight(.semibold))
@@ -79,90 +76,43 @@ private extension AggregationPeriod {
         case .month: "This Month"
         }
     }
+
+    /// The next period when the label is clicked, wrapping around. Order follows
+    /// `allCases` (day → week → month → day).
+    var nextInCycle: AggregationPeriod {
+        let all = AggregationPeriod.allCases
+        let index = all.firstIndex(of: self) ?? all.startIndex
+        return all[(index + 1) % all.count]
+    }
 }
 
-/// A native pull-down button rather than a pop-up picker. AppKit presents a
-/// pull-down menu from the requested edge; a pop-up always aligns its selected
-/// item with the control, which makes `This Month` expand mostly upward.
-private struct OverallPeriodPullDown: NSViewRepresentable {
+/// A plain-text period label that cycles Today → This Week → This Month on each
+/// click. Deliberately not a native `NSPopUpButton`/`NSMenu` nor a SwiftUI
+/// `Menu`/`Picker(.menu)`: those present a real `NSMenu` in a *separate window*
+/// whose tracking loop is closed by the trailing physical Force Touch pressure
+/// event on the first click (BON-48). This is just a Button flipping state, so
+/// that whole failure class cannot occur.
+private struct OverallPeriodCycleButton: View {
     @Binding var selection: AggregationPeriod
+    @State private var isHovering = false
 
-    func makeCoordinator() -> Coordinator {
-        Coordinator(selection: $selection)
-    }
-
-    func makeNSView(context: Context) -> NSPopUpButton {
-        let menu = NSMenu()
-        menu.autoenablesItems = false
-
-        for (index, period) in AggregationPeriod.allCases.enumerated() {
-            let item = NSMenuItem(
-                title: period.overallPickerLabel,
-                action: #selector(Coordinator.selectPeriod(_:)),
-                keyEquivalent: ""
-            )
-            item.tag = index
-            item.target = context.coordinator
-            menu.addItem(item)
+    var body: some View {
+        Button {
+            selection = selection.nextInCycle
+        } label: {
+            Text(selection.overallPickerLabel)
+                .textCase(.uppercase)
+                .fixedSize(horizontal: true, vertical: false)
+                // Pop from secondary to primary on hover so the plain text
+                // still reads as clickable.
+                .foregroundStyle(isHovering ? Color.primary : Color.secondary)
+                .contentShape(Rectangle())
         }
-
-        let button = NSPopUpButton(
-            title: selection.overallPickerLabel,
-            pullDownMenu: menu
-        )
-        button.preferredEdge = .minY
-        button.setAccessibilityLabel("Overall period")
-        update(button, coordinator: context.coordinator)
-        return button
-    }
-
-    func updateNSView(_ button: NSPopUpButton, context: Context) {
-        context.coordinator.selection = $selection
-        update(button, coordinator: context.coordinator)
-    }
-
-    private func update(_ button: NSPopUpButton, coordinator: Coordinator) {
-        let accessibilityTitle = selection.overallPickerLabel
-        let displayTitle = accessibilityTitle.uppercased()
-        let captionSize = NSFont.preferredFont(forTextStyle: .caption1).pointSize
-        let font = NSFont.systemFont(ofSize: captionSize, weight: .semibold)
-        let styledTitle = NSAttributedString(
-            string: displayTitle,
-            attributes: [
-                .font: font,
-                .foregroundColor: NSColor.secondaryLabelColor,
-            ]
-        )
-        button.title = displayTitle
-        button.font = font
-        if let cell = button.cell as? NSPopUpButtonCell {
-            let displayItem = cell.menuItem ?? NSMenuItem()
-            displayItem.attributedTitle = styledTitle
-            cell.menuItem = displayItem
-            cell.needsSizing = true
-        }
-        button.setAccessibilityValue(accessibilityTitle)
-
-        for (index, item) in button.itemArray.enumerated() {
-            item.target = coordinator
-            item.state = index == AggregationPeriod.allCases.firstIndex(of: selection) ? .on : .off
-        }
-
-        button.invalidateIntrinsicContentSize()
-    }
-
-    @MainActor
-    final class Coordinator: NSObject {
-        var selection: Binding<AggregationPeriod>
-
-        init(selection: Binding<AggregationPeriod>) {
-            self.selection = selection
-        }
-
-        @objc func selectPeriod(_ sender: NSMenuItem) {
-            guard AggregationPeriod.allCases.indices.contains(sender.tag) else { return }
-            selection.wrappedValue = AggregationPeriod.allCases[sender.tag]
-        }
+        .buttonStyle(.plain)
+        .onHover { isHovering = $0 }
+        .accessibilityLabel("Overall period")
+        .accessibilityValue(selection.overallPickerLabel)
+        .accessibilityHint("Cycles the summary period")
     }
 }
 
