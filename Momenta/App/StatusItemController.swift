@@ -6,10 +6,11 @@ import SwiftUI
 /// last query time, Refresh, Quit). MenuBarExtra can't do secondary-click
 /// menus, so the status item is managed directly.
 @MainActor
-final class StatusItemController: NSObject {
+final class StatusItemController: NSObject, NSPopoverDelegate {
     private let appState: AppState
     private let statusItem: NSStatusItem
     private let popover: NSPopover
+    private var anchorWindow: NSWindow?
 
     init(appState: AppState) {
         self.appState = appState
@@ -19,6 +20,7 @@ final class StatusItemController: NSObject {
 
         popover.behavior = .transient
         popover.animates = false
+        popover.delegate = self
         let hostingController = NSHostingController(
             rootView: DashboardView().environment(appState)
         )
@@ -68,10 +70,60 @@ final class StatusItemController: NSObject {
         if popover.isShown {
             popover.performClose(nil)
         } else if let button = statusItem.button {
-            popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+            closeAnchorWindow()
+            // The status item lives in its own window that the system slides
+            // sideways whenever the item resizes (as the menu-bar label tracks
+            // the period). Anchoring to the button — or any view inside that
+            // window — drags the popover along. Instead pin a separate, unmoving
+            // anchor window at the item's open-time screen position and anchor
+            // there, so the popover holds still while the item keeps updating.
+            let target: NSView
+            if let buttonWindow = button.window {
+                let screenRect = buttonWindow.convertToScreen(
+                    button.convert(button.bounds, to: nil)
+                )
+                let anchor = makeAnchorWindow(at: screenRect)
+                anchorWindow = anchor
+                target = anchor.contentView ?? button
+            } else {
+                target = button
+            }
+            popover.show(relativeTo: target.bounds, of: target, preferredEdge: .minY)
             popover.contentViewController?.view.window?.makeKey()
             NSApp.activate()
         }
+    }
+
+    /// A borderless, transparent, click-through window parked at the status
+    /// item's screen position. It never moves during the session, so the popover
+    /// anchored to it stays put even as the real status item window slides.
+    private func makeAnchorWindow(at screenRect: NSRect) -> NSWindow {
+        let window = NSWindow(
+            contentRect: screenRect,
+            styleMask: .borderless,
+            backing: .buffered,
+            defer: false
+        )
+        window.isOpaque = false
+        window.backgroundColor = .clear
+        window.hasShadow = false
+        window.ignoresMouseEvents = true
+        window.level = .statusBar
+        window.collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle]
+        window.contentView = PopoverAnchorView(
+            frame: NSRect(origin: .zero, size: screenRect.size)
+        )
+        window.orderFrontRegardless()
+        return window
+    }
+
+    private func closeAnchorWindow() {
+        anchorWindow?.orderOut(nil)
+        anchorWindow = nil
+    }
+
+    func popoverDidClose(_ notification: Notification) {
+        closeAnchorWindow()
     }
 
     private func showContextMenu(with event: NSEvent) {
@@ -212,6 +264,13 @@ func openSettingsWindow() {
     if let url = URL(string: "momenta://settings") {
         NSWorkspace.shared.open(url)
     }
+}
+
+/// The content view of the invisible anchor window. Purely a geometric anchor
+/// for the popover; it never intercepts clicks so the status item underneath
+/// and the popover's transient dismissal behave normally.
+private final class PopoverAnchorView: NSView {
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
 }
 
 /// Thin wrapper so the status item label participates in SwiftUI observation.
