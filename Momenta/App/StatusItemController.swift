@@ -11,6 +11,7 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
     private let statusItem: NSStatusItem
     private let popover: NSPopover
     private var anchorWindow: NSWindow?
+    private var dismissMonitors: [Any] = []
 
     init(appState: AppState) {
         self.appState = appState
@@ -18,7 +19,11 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
         self.popover = NSPopover()
         super.init()
 
-        popover.behavior = .transient
+        // Not `.transient`: the popover is anchored to our own always-front
+        // anchor window (so it can't drift as the status item resizes), and that
+        // arrangement defeats AppKit's built-in transient dismissal. We own
+        // dismissal explicitly instead — see installDismissMonitors().
+        popover.behavior = .applicationDefined
         popover.animates = false
         popover.delegate = self
         let hostingController = NSHostingController(
@@ -48,6 +53,22 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
             button.sendAction(on: [.leftMouseUp, .rightMouseUp])
         }
 
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(appDidResignActive),
+            name: NSApplication.didResignActiveNotification,
+            object: nil
+        )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(willOpenSettings),
+            name: .momentaWillOpenSettings,
+            object: nil
+        )
+    }
+
+    deinit {
+        NotificationCenter.default.removeObserver(self)
     }
 
     // MARK: Interactions
@@ -91,7 +112,72 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
             popover.show(relativeTo: target.bounds, of: target, preferredEdge: .minY)
             popover.contentViewController?.view.window?.makeKey()
             NSApp.activate()
+            installDismissMonitors()
         }
+    }
+
+    // MARK: Popover dismissal
+
+    // The popover is `.applicationDefined`, so we close it ourselves: on a click
+    // outside it, when the app deactivates, or on Escape. Clicks on the status
+    // item are left to the toggle above (its action always fires), so a single
+    // click closes cleanly without racing a reopen.
+    private func installDismissMonitors() {
+        removeDismissMonitors()
+
+        let local = NSEvent.addLocalMonitorForEvents(
+            matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown, .keyDown]
+        ) { [weak self] event in
+            guard let self, self.popover.isShown else { return event }
+
+            if event.type == .keyDown {
+                if event.keyCode == 53 { // Escape
+                    self.popover.performClose(nil)
+                    return nil
+                }
+                return event
+            }
+
+            // Clicks inside the popover are interaction, not dismissal.
+            if let eventWindow = event.window,
+               eventWindow == self.popover.contentViewController?.view.window {
+                return event
+            }
+            // The status item's own click is handled by the toggle; closing here
+            // too would race the reopen.
+            if event.window == self.statusItem.button?.window {
+                return event
+            }
+
+            self.popover.performClose(nil)
+            return event
+        }
+
+        let global = NSEvent.addGlobalMonitorForEvents(
+            matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]
+        ) { [weak self] _ in
+            guard let self, self.popover.isShown else { return }
+            self.popover.performClose(nil)
+        }
+
+        dismissMonitors = [local, global].compactMap { $0 }
+    }
+
+    private func removeDismissMonitors() {
+        for monitor in dismissMonitors {
+            NSEvent.removeMonitor(monitor)
+        }
+        dismissMonitors.removeAll()
+    }
+
+    @objc private func appDidResignActive() {
+        guard popover.isShown else { return }
+        popover.performClose(nil)
+    }
+
+    @objc private func willOpenSettings() {
+        guard popover.isShown else { return }
+        popover.performClose(nil)
     }
 
     /// A borderless, transparent, click-through window parked at the status
@@ -123,6 +209,7 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
     }
 
     func popoverDidClose(_ notification: Notification) {
+        removeDismissMonitors()
         closeAnchorWindow()
     }
 
@@ -255,11 +342,18 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
     }
 }
 
+extension Notification.Name {
+    /// Posted just before the Settings window is summoned, so the popover can
+    /// dismiss itself (it is `.applicationDefined` and won't auto-close).
+    static let momentaWillOpenSettings = Notification.Name("Momenta.willOpenSettings")
+}
+
 /// Summons the SwiftUI settings window scene from AppKit contexts (status
 /// item menu, popover buttons) through the app's URL scheme — the supported
 /// way to open a scene without a SwiftUI environment at hand.
 @MainActor
 func openSettingsWindow() {
+    NotificationCenter.default.post(name: .momentaWillOpenSettings, object: nil)
     NSApp.activate()
     if let url = URL(string: "momenta://settings") {
         NSWorkspace.shared.open(url)
