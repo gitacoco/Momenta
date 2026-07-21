@@ -379,6 +379,10 @@ final class AccountManager {
                 }
                 return
             }
+            // The token was already matched to this account in this process.
+            // Re-reading the same Keychain bytes does not require another /me
+            // request; a changed token still fails closed until it is verified.
+            guard token != validatedToken else { return }
             let me = try await TogglAPIClient(token: token, transport: transport).me()
             guard accountMatches(snapshot: snapshot, me: me) else {
                 validatedToken = nil

@@ -32,11 +32,13 @@ final class ICloudSyncManager {
     private let database: any CloudSyncDatabase
     private let localStore: ConfigSyncStateStore
     private let defaults: UserDefaults
+    private let logoRetryDelay: Duration
     private var pendingInitialRecord: CloudConfigRecord?
     private var pendingInitialPayload: SyncedConfigPayload?
     private var syncTask: Task<Void, Never>?
     private var isSyncInProgress = false
     private var needsAnotherSync = false
+    private var hasAttemptedAutomaticLogoRetry = false
 
     private(set) var state: State
     private(set) var lastSuccessfulSyncAt: Date?
@@ -45,12 +47,14 @@ final class ICloudSyncManager {
         account: AccountManager,
         config: ConfigStore,
         database: any CloudSyncDatabase = CloudKitSyncDatabase(),
-        defaults: UserDefaults = .standard
+        defaults: UserDefaults = .standard,
+        logoRetryDelay: Duration = .seconds(2)
     ) {
         self.account = account
         self.config = config
         self.database = database
         self.defaults = defaults
+        self.logoRetryDelay = logoRetryDelay
         localStore = ConfigSyncStateStore(defaults: defaults)
         state = account.usesICloudCredential ? .syncing : .off
         lastSuccessfulSyncAt = defaults.object(forKey: Self.lastSuccessKey) as? Date
@@ -79,6 +83,7 @@ final class ICloudSyncManager {
 
     @discardableResult
     func enable() async -> Bool {
+        resetAutomaticLogoRetry()
         state = .syncing
         let enabled = await account.enableICloudCredentialSync()
         guard enabled else {
@@ -92,6 +97,7 @@ final class ICloudSyncManager {
     }
 
     func confirmDiscoveredAccount() async {
+        resetAutomaticLogoRetry()
         state = .syncing
         guard await account.confirmDiscoveredSyncedAccount() else {
             state = .needsAttention(account.credentialAttention?.message ?? "The Toggl account could not be connected.")
@@ -131,6 +137,7 @@ final class ICloudSyncManager {
 
     func handleForeground() async {
         guard account.usesICloudCredential else { return }
+        resetAutomaticLogoRetry()
         await account.validateICloudCredentialForForeground()
         guard account.credentialAttention == nil else {
             state = .needsAttention(account.credentialAttention?.message ?? "The Toggl account needs attention.")
@@ -140,6 +147,7 @@ final class ICloudSyncManager {
     }
 
     func retry() {
+        resetAutomaticLogoRetry()
         scheduleSync()
     }
 
@@ -148,6 +156,7 @@ final class ICloudSyncManager {
               let remote = pendingInitialPayload,
               let userID = connectedUserID
         else { return }
+        resetAutomaticLogoRetry()
         var local = localStore.load(togglUserID: userID)
         local.shadow = .initialMerge(local: local.shadow, server: remote)
         local.base = remote
@@ -287,7 +296,8 @@ final class ICloudSyncManager {
     }
 
     private func capture(_ change: ConfigStore.UserChange) {
-        guard account.usesICloudCredential, let userID = connectedUserID else { return }
+        guard let userID = connectedUserID else { return }
+        resetAutomaticLogoRetry()
         var local = localStore.load(togglUserID: userID)
         seedShadowIfNeeded(&local)
         switch change {
@@ -308,13 +318,14 @@ final class ICloudSyncManager {
         }
         local.isDirty = true
         localStore.save(local, togglUserID: userID)
+        guard account.usesICloudCredential else { return }
         scheduleSync()
     }
 
-    private func scheduleSync() {
+    private func scheduleSync(after delay: Duration = .milliseconds(250)) {
         syncTask?.cancel()
         syncTask = Task { [weak self] in
-            try? await Task.sleep(for: .milliseconds(250))
+            try? await Task.sleep(for: delay)
             guard !Task.isCancelled else { return }
             await self?.runScheduledSync()
         }
@@ -483,7 +494,7 @@ final class ICloudSyncManager {
     ) async {
         var local = original
         var fileNames: [Int: String] = [:]
-        var logoWarning: String?
+        var shouldRetryLogo = false
 
         for (clientID, synced) in payload.clients {
             guard syncIsStillEnabled(for: userID) else { return }
@@ -508,7 +519,7 @@ final class ICloudSyncManager {
                 ),
                       remote.revision == revision
                 else {
-                    logoWarning = "A client Logo is still syncing. Momenta will retry."
+                    shouldRetryLogo = true
                     continue
                 }
                 guard syncIsStillEnabled(for: userID) else { return }
@@ -518,15 +529,25 @@ final class ICloudSyncManager {
                 fileNames[clientID] = try LogoStore.installSyncedLogo(remote.bytes, for: clientID)
                 local.installedLogoRevisions[clientID] = revision
             } catch {
-                logoWarning = "A client Logo could not be downloaded. Momenta will retry."
+                shouldRetryLogo = true
             }
         }
         guard syncIsStillEnabled(for: userID) else { return }
         localStore.save(local, togglUserID: userID)
         config.applySyncedPayload(payload, localLogoFileNames: fileNames)
-        if let logoWarning {
-            state = .needsAttention(logoWarning)
+        if shouldRetryLogo {
+            scheduleAutomaticLogoRetry()
         }
+    }
+
+    private func resetAutomaticLogoRetry() {
+        hasAttemptedAutomaticLogoRetry = false
+    }
+
+    private func scheduleAutomaticLogoRetry() {
+        guard !hasAttemptedAutomaticLogoRetry else { return }
+        hasAttemptedAutomaticLogoRetry = true
+        scheduleSync(after: logoRetryDelay)
     }
 
     private func syncIsStillEnabled(for userID: Int) -> Bool {
@@ -581,6 +602,9 @@ final class ICloudSyncManager {
 
     private static func encodePayload(_ payload: SyncedConfigPayload) throws -> Data {
         let encoder = JSONEncoder()
+        // This stabilizes string-keyed object fields only. Dictionaries with
+        // non-String keys encode as arrays whose byte order is unspecified;
+        // synchronization therefore compares decoded values, never raw bytes.
         encoder.outputFormatting = [.sortedKeys]
         return try encoder.encode(payload)
     }

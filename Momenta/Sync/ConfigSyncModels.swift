@@ -9,6 +9,7 @@ struct SyncedClientConfig: Codable, Equatable, Sendable {
     var colorHex: String
     var isEnabled: Bool
     var pacing: PacingMode
+    var customWorkDays: Set<Int>?
     var goalHistory: [YearMonth: MonthlyGoal]
     var currencyCode: String?
     /// A content identity, not a local file name. The matching bytes live in
@@ -21,6 +22,7 @@ struct SyncedClientConfig: Codable, Equatable, Sendable {
         colorHex: String,
         isEnabled: Bool,
         pacing: PacingMode,
+        customWorkDays: Set<Int>? = nil,
         goalHistory: [YearMonth: MonthlyGoal],
         currencyCode: String?,
         logoRevision: String?
@@ -30,6 +32,7 @@ struct SyncedClientConfig: Codable, Equatable, Sendable {
         self.colorHex = colorHex
         self.isEnabled = isEnabled
         self.pacing = pacing
+        self.customWorkDays = customWorkDays
         self.goalHistory = goalHistory
         self.currencyCode = currencyCode
         self.logoRevision = logoRevision
@@ -41,6 +44,7 @@ struct SyncedClientConfig: Codable, Equatable, Sendable {
         colorHex = client.colorHex
         isEnabled = client.isEnabled
         pacing = client.pacing
+        customWorkDays = client.customWorkDays
         goalHistory = client.goalHistory
         currencyCode = client.currencyCode
         self.logoRevision = logoRevision
@@ -52,10 +56,25 @@ struct SyncedClientConfig: Codable, Equatable, Sendable {
         projected.colorHex = colorHex
         projected.isEnabled = isEnabled
         projected.pacing = pacing
+        projected.customWorkDays = customWorkDays
         projected.goalHistory = goalHistory
         projected.currencyCode = currencyCode
         projected.logoFileName = localLogoFileName
         return projected
+    }
+
+    /// Toggl reconciliation creates disabled clients with deterministic
+    /// defaults. Those identity-only rows are not historical user settings
+    /// and must not force a first-sync merge confirmation on a clean Mac.
+    var hasUserSettings: Bool {
+        displayNameOverride != nil
+            || colorHex.uppercased() != ConfigStore.defaultColor(for: clientID).uppercased()
+            || isEnabled
+            || pacing != .weekdays
+            || customWorkDays != nil
+            || !goalHistory.isEmpty
+            || currencyCode != nil
+            || logoRevision != nil
     }
 }
 
@@ -65,11 +84,14 @@ struct SyncedClientConfig: Codable, Equatable, Sendable {
 struct SyncedConfigPayload: Codable, Equatable, Sendable {
     var clients: [Int: SyncedClientConfig]
     var order: [Int]
+    /// Distinguishes a deliberate drag reorder from the deterministic order
+    /// produced when Toggl clients are first reconciled on a clean Mac.
+    var userAuthoredOrder: Bool? = nil
 
     static let empty = SyncedConfigPayload(clients: [:], order: [])
 
     var hasUserSettings: Bool {
-        !clients.isEmpty
+        clients.values.contains(where: \.hasUserSettings) || userAuthoredOrder == true
     }
 
     /// Updates one projected client while preserving every unmatched entry.
@@ -91,6 +113,7 @@ struct SyncedConfigPayload: Codable, Equatable, Sendable {
         let known = Set(merged)
         merged += visibleOrder.filter { !known.contains($0) }
         order = Self.deduplicated(merged)
+        userAuthoredOrder = true
     }
 
     /// Three-way merge against the last payload accepted by this device.
@@ -128,7 +151,16 @@ struct SyncedConfigPayload: Codable, Equatable, Sendable {
             fallbacks: [server.order, local.order, base.order],
             clientIDs: mergedClients.keys
         )
-        return SyncedConfigPayload(clients: mergedClients, order: completeOrder)
+        let orderWasAuthored = mergeField(
+            base: base.userAuthoredOrder ?? false,
+            local: local.userAuthoredOrder ?? false,
+            server: server.userAuthoredOrder ?? false
+        ) ?? false
+        return SyncedConfigPayload(
+            clients: mergedClients,
+            order: completeOrder,
+            userAuthoredOrder: orderWasAuthored ? true : nil
+        )
     }
 
     /// Conservative first-sync merge when two devices have historical config
@@ -167,7 +199,13 @@ struct SyncedConfigPayload: Codable, Equatable, Sendable {
             fallbacks: [local.order],
             clientIDs: mergedClients.keys
         )
-        return SyncedConfigPayload(clients: mergedClients, order: order)
+        return SyncedConfigPayload(
+            clients: mergedClients,
+            order: order,
+            userAuthoredOrder: local.userAuthoredOrder == true || server.userAuthoredOrder == true
+                ? true
+                : nil
+        )
     }
 
     private static func mergeClient(
@@ -188,6 +226,11 @@ struct SyncedConfigPayload: Codable, Equatable, Sendable {
                 ?? server.isEnabled,
             pacing: mergeField(base: base?.pacing, local: local.pacing, server: server.pacing)
                 ?? server.pacing,
+            customWorkDays: mergeField(
+                base: base?.customWorkDays,
+                local: local.customWorkDays,
+                server: server.customWorkDays
+            ),
             goalHistory: mergeDictionary(
                 base: base?.goalHistory ?? [:],
                 local: local.goalHistory,

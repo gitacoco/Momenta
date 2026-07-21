@@ -8,7 +8,9 @@ final class FakeCloudSyncDatabase: CloudSyncDatabase, @unchecked Sendable {
     var configRecord: CloudConfigRecord?
     private(set) var configSaveCount = 0
     private(set) var logoSaveCount = 0
+    private(set) var logoFetchCount = 0
     private(set) var events: [String] = []
+    var logoFetchResponses: [CloudLogoRecord?] = []
     var beforeSaveReturns: (@MainActor @Sendable () -> Void)?
 
     func accountStatus() async throws -> CKAccountStatus { status }
@@ -39,7 +41,11 @@ final class FakeCloudSyncDatabase: CloudSyncDatabase, @unchecked Sendable {
         togglUserID: Int,
         clientID: Int,
         revision: String
-    ) async throws -> CloudLogoRecord? { nil }
+    ) async throws -> CloudLogoRecord? {
+        logoFetchCount += 1
+        guard !logoFetchResponses.isEmpty else { return nil }
+        return logoFetchResponses.removeFirst()
+    }
 
     func saveLogo(
         togglUserID: Int,
@@ -191,6 +197,79 @@ struct ICloudSyncManagerTests {
         #expect(database.configSaveCount == 0)
     }
 
+    @Test func cleanTogglClientsAdoptRemoteWithoutInitialMergeConfirmation() async {
+        let defaults = freshDefaults()
+        let config = ConfigStore(defaults: defaults)
+        config.merge(
+            workspaces: [TogglWorkspace(id: 10, name: "Studio")],
+            togglClients: [TogglClientDTO(id: 7, wid: 10, name: "Client", archived: false)]
+        )
+        #expect(config.clients[0].isEnabled == false)
+        #expect(config.clients[0].goalHistory.isEmpty)
+
+        let database = FakeCloudSyncDatabase()
+        let remote = SyncedConfigPayload(
+            clients: [7: syncedClient(7, color: "#FF0000")],
+            order: [7]
+        )
+        database.configRecord = cloudRecord(remote)
+        let manager = ICloudSyncManager(
+            account: connectedAccount(defaults: defaults),
+            config: config,
+            database: database,
+            defaults: defaults
+        )
+
+        await manager.handleForeground()
+
+        #expect(manager.state == .synced)
+        #expect(config.client(id: 7)?.isEnabled == true)
+        #expect(config.client(id: 7)?.colorHex == "#FF0000")
+        #expect(database.configSaveCount == 0)
+    }
+
+    @Test func reorderBeforeEnablingSyncIsRememberedAsUserAuthored() {
+        let defaults = freshDefaults()
+        let snapshot = AccountSnapshot(
+            togglUserID: 1,
+            fullname: "Z",
+            email: "z@example.com",
+            workspaces: [],
+            connectedAt: Date()
+        )
+        defaults.set(try! JSONEncoder().encode(snapshot), forKey: "toggl.accountSnapshot")
+        let account = AccountManager(
+            tokenStore: InMemoryTokenStore(token: "tok"),
+            transport: SequenceTransport([]),
+            defaults: defaults
+        )
+        let config = ConfigStore(defaults: defaults)
+        config.merge(
+            workspaces: [TogglWorkspace(id: 10, name: "Studio")],
+            togglClients: [
+                TogglClientDTO(id: 7, wid: 10, name: "A", archived: false),
+                TogglClientDTO(id: 8, wid: 10, name: "B", archived: false),
+            ]
+        )
+        let database = FakeCloudSyncDatabase()
+        let manager = ICloudSyncManager(
+            account: account,
+            config: config,
+            database: database,
+            defaults: defaults
+        )
+
+        withExtendedLifetime(manager) {
+            config.move(ids: [7, 8], fromOffsets: IndexSet(integer: 0), toOffset: 2)
+        }
+
+        let local = ConfigSyncStateStore(defaults: defaults).load(togglUserID: 1)
+        #expect(local.shadow.order == [8, 7])
+        #expect(local.shadow.userAuthoredOrder == true)
+        #expect(local.shadow.hasUserSettings)
+        #expect(database.configSaveCount == 0)
+    }
+
     @Test func stoppingSyncPreventsOldShadowFromReprojecting() throws {
         let defaults = freshDefaults()
         let config = ConfigStore(defaults: defaults)
@@ -316,5 +395,95 @@ struct ICloudSyncManagerTests {
         #expect(database.events.count == 2)
         #expect(database.events.first?.hasPrefix("logo:7:") == true)
         #expect(database.events.last == "config")
+    }
+
+    @Test func delayedLogoIsRetriedOnceWithoutNeedsAttention() async throws {
+        let defaults = freshDefaults()
+        let clientID = 9_876_543
+        let fileName = "client-\(clientID)-icloud"
+        defer { LogoStore.deleteLogo(named: fileName) }
+        let config = ConfigStore(defaults: defaults)
+        config.merge(
+            workspaces: [TogglWorkspace(id: 10, name: "Studio")],
+            togglClients: [TogglClientDTO(id: clientID, wid: 10, name: "Client", archived: false)]
+        )
+        var remoteClient = syncedClient(clientID)
+        remoteClient.logoRevision = "revision-1"
+        let remote = SyncedConfigPayload(clients: [clientID: remoteClient], order: [clientID])
+        let database = FakeCloudSyncDatabase()
+        database.configRecord = cloudRecord(remote)
+        database.logoFetchResponses = [
+            nil,
+            CloudLogoRecord(revision: "revision-1", bytes: Data([1, 2, 3])),
+        ]
+        let manager = ICloudSyncManager(
+            account: connectedAccount(defaults: defaults),
+            config: config,
+            database: database,
+            defaults: defaults,
+            logoRetryDelay: .milliseconds(10)
+        )
+
+        await manager.handleForeground()
+        try await Task.sleep(for: .milliseconds(100))
+
+        #expect(manager.state == .synced)
+        #expect(database.logoFetchCount == 2)
+        #expect(config.client(id: clientID)?.logoFileName == fileName)
+    }
+
+    @Test func missingLogoDoesNotCreateAnAutomaticRetryLoop() async throws {
+        let defaults = freshDefaults()
+        let clientID = 9_876_544
+        let config = ConfigStore(defaults: defaults)
+        config.merge(
+            workspaces: [TogglWorkspace(id: 10, name: "Studio")],
+            togglClients: [TogglClientDTO(id: clientID, wid: 10, name: "Client", archived: false)]
+        )
+        var remoteClient = syncedClient(clientID)
+        remoteClient.logoRevision = "missing-revision"
+        let database = FakeCloudSyncDatabase()
+        database.configRecord = cloudRecord(
+            SyncedConfigPayload(clients: [clientID: remoteClient], order: [clientID])
+        )
+        database.logoFetchResponses = [nil, nil]
+        let manager = ICloudSyncManager(
+            account: connectedAccount(defaults: defaults),
+            config: config,
+            database: database,
+            defaults: defaults,
+            logoRetryDelay: .milliseconds(10)
+        )
+
+        await manager.handleForeground()
+        try await Task.sleep(for: .milliseconds(100))
+
+        #expect(manager.state == .synced)
+        #expect(database.logoFetchCount == 2)
+        #expect(config.client(id: clientID)?.logoFileName == nil)
+    }
+}
+
+struct LogoStoreTests {
+    @Test func replacingLogoRemovesTheSupersededStorageVariant() throws {
+        let clientID = Int.random(in: 10_000_000...99_999_999)
+        let source = FileManager.default.temporaryDirectory
+            .appending(path: "momenta-logo-\(UUID().uuidString).png")
+        try Data([1, 2, 3]).write(to: source)
+        defer {
+            try? FileManager.default.removeItem(at: source)
+            LogoStore.deleteLogo(named: "client-\(clientID).png")
+            LogoStore.deleteLogo(named: "client-\(clientID)-icloud")
+        }
+
+        let localName = try LogoStore.importLogo(from: source, for: clientID)
+        #expect(FileManager.default.fileExists(atPath: LogoStore.url(for: localName).path))
+
+        let syncedName = try LogoStore.installSyncedLogo(Data([4, 5, 6]), for: clientID)
+        #expect(!FileManager.default.fileExists(atPath: LogoStore.url(for: localName).path))
+        #expect(FileManager.default.fileExists(atPath: LogoStore.url(for: syncedName).path))
+
+        _ = try LogoStore.importLogo(from: source, for: clientID)
+        #expect(!FileManager.default.fileExists(atPath: LogoStore.url(for: syncedName).path))
     }
 }

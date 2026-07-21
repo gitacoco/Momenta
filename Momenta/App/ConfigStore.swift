@@ -179,12 +179,12 @@ final class ConfigStore {
         }
     }
 
-    private static let palette = [
+    nonisolated private static let palette = [
         "#5B8DEF", "#F2994A", "#9B51E0", "#27AE60", "#EB5757",
         "#2D9CDB", "#F2C94C", "#BB6BD9", "#219653", "#56CCF2",
     ]
 
-    static func defaultColor(for clientID: Int) -> String {
+    nonisolated static func defaultColor(for clientID: Int) -> String {
         palette[abs(clientID) % palette.count]
     }
 }

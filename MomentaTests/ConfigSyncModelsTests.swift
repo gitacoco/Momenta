@@ -11,6 +11,8 @@ struct ConfigSyncModelsTests {
         name: String? = nil,
         color: String = "#111111",
         enabled: Bool = false,
+        pacing: PacingMode = .weekdays,
+        customWorkDays: Set<Int>? = nil,
         goals: [YearMonth: MonthlyGoal] = [:],
         logo: String? = nil
     ) -> SyncedClientConfig {
@@ -19,7 +21,8 @@ struct ConfigSyncModelsTests {
             displayNameOverride: name,
             colorHex: color,
             isEnabled: enabled,
-            pacing: .weekdays,
+            pacing: pacing,
+            customWorkDays: customWorkDays,
             goalHistory: goals,
             currencyCode: "USD",
             logoRevision: logo
@@ -70,6 +73,55 @@ struct ConfigSyncModelsTests {
         #expect(merged.clients[7]?.colorHex == "#FF0000")
     }
 
+    @Test func togglDefaultClientsDoNotCountAsUserSettings() {
+        let defaultClient = SyncedClientConfig(
+            clientID: 7,
+            displayNameOverride: nil,
+            colorHex: ConfigStore.defaultColor(for: 7),
+            isEnabled: false,
+            pacing: .weekdays,
+            goalHistory: [:],
+            currencyCode: nil,
+            logoRevision: nil
+        )
+        let defaultsOnly = payload([defaultClient])
+
+        #expect(defaultsOnly.hasUserSettings == false)
+
+        var authored = defaultsOnly
+        authored.clients[7]?.isEnabled = true
+        #expect(authored.hasUserSettings)
+    }
+
+    @Test func customWorkDaysRoundTripAndMergeAsAField() throws {
+        let base = payload([client(7, pacing: .custom, customWorkDays: [2, 4, 6])])
+        let local = payload([client(7, pacing: .custom, customWorkDays: [2, 3, 4, 5])])
+        let server = base
+
+        let merged = SyncedConfigPayload.merge(base: base, local: local, server: server)
+        let encoded = try JSONEncoder().encode(merged)
+        let decoded = try JSONDecoder().decode(SyncedConfigPayload.self, from: encoded)
+        let projected = decoded.clients[7]?.applying(
+            to: ClientConfig(
+                id: 7,
+                workspaceID: 10,
+                workspaceName: "Studio",
+                togglName: "Client",
+                displayNameOverride: nil,
+                colorHex: ConfigStore.defaultColor(for: 7),
+                isEnabled: false,
+                isArchivedInToggl: false,
+                pacing: .weekdays,
+                goalHistory: [:]
+            ),
+            localLogoFileName: nil
+        )
+
+        #expect(decoded.clients[7]?.customWorkDays == [2, 3, 4, 5])
+        #expect(projected?.pacing == .custom)
+        #expect(projected?.customWorkDays == [2, 3, 4, 5])
+    }
+
     @Test func MissingProjectedClientSurvivesAnotherClientEditAndUpload() {
         let remoteOnlyGoal = MonthlyGoal(hourlyRate: 200, input: .revenue(20_000))
         let base = payload([
@@ -96,6 +148,8 @@ struct ConfigSyncModelsTests {
 
         #expect(shadow.order == [2, 99, 1])
         #expect(shadow.clients[99] != nil)
+        #expect(shadow.userAuthoredOrder == true)
+        #expect(shadow.hasUserSettings)
     }
 
     @Test func initialMergeKeepsBothSidesAndUsesServerForAmbiguousFields() {

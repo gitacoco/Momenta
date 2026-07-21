@@ -28,6 +28,7 @@ enum LogoStore {
         let destination = url(for: fileName)
         try? FileManager.default.removeItem(at: destination)
         try FileManager.default.copyItem(at: source, to: destination)
+        removeSupersededLogos(for: clientID, keeping: fileName)
         return fileName
     }
 
@@ -40,7 +41,24 @@ enum LogoStore {
     static func installSyncedLogo(_ data: Data, for clientID: Int) throws -> String {
         let fileName = "client-\(clientID)-icloud"
         try data.write(to: url(for: fileName), options: .atomic)
+        removeSupersededLogos(for: clientID, keeping: fileName)
         return fileName
+    }
+
+    private static func removeSupersededLogos(for clientID: Int, keeping keptFileName: String) {
+        guard let files = try? FileManager.default.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: nil
+        ) else { return }
+        let localPrefix = "client-\(clientID)."
+        let syncedName = "client-\(clientID)-icloud"
+        for file in files {
+            let name = file.lastPathComponent
+            guard name != keptFileName,
+                  name == syncedName || name.hasPrefix(localPrefix)
+            else { continue }
+            try? FileManager.default.removeItem(at: file)
+        }
     }
 
     static func image(named fileName: String?) -> NSImage? {

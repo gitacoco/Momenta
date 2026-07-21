@@ -363,6 +363,46 @@ struct AccountManagerTests {
         ))
     }
 
+    @Test func foregroundReusesAnUnchangedValidatedSyncedToken() async throws {
+        let defaults = freshDefaults()
+        defaults.set(true, forKey: "momenta.iCloud.credentialEnabled")
+        let snapshot = AccountSnapshot(
+            togglUserID: 1,
+            fullname: "Z",
+            email: "z@example.com",
+            workspaces: [],
+            connectedAt: Date()
+        )
+        defaults.set(try JSONEncoder().encode(snapshot), forKey: "toggl.accountSnapshot")
+        let store = InMemoryTokenStore(syncedToken: "same-token")
+        let otherMe = Data(#"{"id":2,"fullname":"Other","email":"other@example.com"}"#.utf8)
+        let transport = SequenceTransport([
+            .success((Self.meJSON, 200)),
+            .success((otherMe, 200)),
+        ])
+        let manager = AccountManager(tokenStore: store, transport: transport, defaults: defaults)
+
+        await manager.validateICloudCredentialForForeground()
+        #expect(manager.apiClient() != nil)
+        #expect(transport.requests.count == 1)
+
+        // A second foreground must not consume another request or invalidate
+        // the already-verified credential when no network response is queued.
+        await manager.validateICloudCredentialForForeground()
+        #expect(manager.apiClient() != nil)
+        #expect(manager.credentialAttention == nil)
+        #expect(transport.requests.count == 1)
+
+        try store.save("changed-token", scope: .synchronizable)
+        await manager.validateICloudCredentialForForeground()
+        #expect(manager.apiClient() == nil)
+        #expect(manager.credentialAttention == .accountMismatch(
+            expectedEmail: "z@example.com",
+            foundEmail: "other@example.com"
+        ))
+        #expect(transport.requests.count == 2)
+    }
+
     @Test func stoppingICloudOnThisMacKeepsSyncedItemAndCopiesLocalToken() throws {
         let store = InMemoryTokenStore(syncedToken: "remote")
         let defaults = freshDefaults()
