@@ -43,6 +43,29 @@ struct ProgressCalculatorTests {
         #expect(weights.reduce(0, +) == 31)
     }
 
+    @Test func customPacingCountsOnlySelectedWeekdays() {
+        // Mon/Wed/Fri (Calendar weekdays 2/4/6). July 2026: 4 Mondays,
+        // 5 Wednesdays, 5 Fridays.
+        let weights = ProgressCalculator.dailyWeights(
+            month: july, pacing: .custom, customWorkDays: [2, 4, 6], timeZone: utc
+        )
+        #expect(weights[0] == 1) // Wednesday the 1st
+        #expect(weights[1] == 0) // Thursday the 2nd
+        #expect(weights[5] == 1) // Monday the 6th
+        #expect(weights.reduce(0, +) == 14)
+    }
+
+    @Test func customPacingWithoutSelectionFallsBackToWeekdays() {
+        let missing = ProgressCalculator.dailyWeights(
+            month: july, pacing: .custom, customWorkDays: nil, timeZone: utc
+        )
+        let empty = ProgressCalculator.dailyWeights(
+            month: july, pacing: .custom, customWorkDays: [], timeZone: utc
+        )
+        #expect(missing.reduce(0, +) == 23)
+        #expect(empty.reduce(0, +) == 23)
+    }
+
     // MARK: Planned line
 
     @Test(arguments: [PacingMode.weekdays, PacingMode.calendarDays])

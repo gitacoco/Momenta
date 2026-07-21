@@ -205,7 +205,7 @@ enum ProgressCalculator {
         let calendar = YearMonth.calendar(in: timeZone)
         let monthStart = month.start(in: timeZone)
         let dayCount = month.dayCount(in: timeZone)
-        let weights = dailyWeights(month: month, pacing: client.pacing, timeZone: timeZone)
+        let weights = dailyWeights(month: month, pacing: client.pacing, customWorkDays: client.customWorkDays, timeZone: timeZone)
         let totalWeight = weights.reduce(0, +)
 
         // Actual hours per day, attributed by entry start time.
@@ -260,6 +260,7 @@ enum ProgressCalculator {
                 actualHours: actualHours,
                 month: month,
                 pacing: client.pacing,
+                customWorkDays: client.customWorkDays,
                 timeZone: timeZone,
                 now: now
             )
@@ -317,7 +318,7 @@ enum ProgressCalculator {
         var aggregateWeights = [Int](repeating: 0, count: month.dayCount(in: timeZone))
         for client in clients where client.state(for: month) == .configured {
             guard let goal = client.goal(for: month), goal.isComplete else { continue }
-            let weights = dailyWeights(month: month, pacing: client.pacing, timeZone: timeZone)
+            let weights = dailyWeights(month: month, pacing: client.pacing, customWorkDays: client.customWorkDays, timeZone: timeZone)
             for index in weights.indices where weights[index] > 0 {
                 aggregateWeights[index] = 1
             }
@@ -368,6 +369,7 @@ enum ProgressCalculator {
                     actualHours: monthHours,
                     month: month,
                     pacing: client.pacing,
+                    customWorkDays: client.customWorkDays,
                     timeZone: timeZone,
                     now: now
                 )
@@ -481,6 +483,7 @@ enum ProgressCalculator {
                 actualHours: cumulativeBefore,
                 month: progress.month,
                 pacing: progress.client.pacing,
+                customWorkDays: progress.client.customWorkDays,
                 timeZone: timeZone,
                 now: refDayStart
             )
@@ -552,6 +555,7 @@ enum ProgressCalculator {
                     let weights = scheduledWeightsByMonth[dayMonth] ?? dailyWeights(
                         month: dayMonth,
                         pacing: client.pacing,
+                        customWorkDays: client.customWorkDays,
                         timeZone: timeZone
                     )
                     scheduledWeightsByMonth[dayMonth] = weights
@@ -698,14 +702,20 @@ enum ProgressCalculator {
     // MARK: Pacing helpers
 
     /// Weight of each day of the month under the pacing mode (0 or 1).
-    static func dailyWeights(month: YearMonth, pacing: PacingMode, timeZone: TimeZone) -> [Int] {
+    /// `customWorkDays` is the client's work-weekday selection, used only by
+    /// `.custom` pacing (see `PacingMode.workWeekdays(custom:)`).
+    static func dailyWeights(
+        month: YearMonth,
+        pacing: PacingMode,
+        customWorkDays: Set<Int>? = nil,
+        timeZone: TimeZone
+    ) -> [Int] {
         let calendar = YearMonth.calendar(in: timeZone)
         let monthStart = month.start(in: timeZone)
+        let workWeekdays = pacing.workWeekdays(custom: customWorkDays)
         return (0..<month.dayCount(in: timeZone)).map { dayIndex in
-            guard pacing == .weekdays else { return 1 }
             guard let dayStart = calendar.date(byAdding: .day, value: dayIndex, to: monthStart) else { return 0 }
-            let weekday = calendar.component(.weekday, from: dayStart)
-            return (weekday == 1 || weekday == 7) ? 0 : 1
+            return workWeekdays.contains(calendar.component(.weekday, from: dayStart)) ? 1 : 0
         }
     }
 
@@ -714,12 +724,13 @@ enum ProgressCalculator {
     static func remainingScheduledDays(
         month: YearMonth,
         pacing: PacingMode,
+        customWorkDays: Set<Int>? = nil,
         timeZone: TimeZone,
         after now: Date
     ) -> Int {
         let calendar = YearMonth.calendar(in: timeZone)
         let monthStart = month.start(in: timeZone)
-        let weights = dailyWeights(month: month, pacing: pacing, timeZone: timeZone)
+        let weights = dailyWeights(month: month, pacing: pacing, customWorkDays: customWorkDays, timeZone: timeZone)
         var remaining = 0
         for dayIndex in 0..<weights.count {
             guard let dayStart = calendar.date(byAdding: .day, value: dayIndex, to: monthStart) else { continue }
@@ -739,6 +750,7 @@ enum ProgressCalculator {
         actualHours: Decimal,
         month: YearMonth,
         pacing: PacingMode,
+        customWorkDays: Set<Int>? = nil,
         timeZone: TimeZone,
         now: Date
     ) -> Decimal {
@@ -746,6 +758,7 @@ enum ProgressCalculator {
         let remainingWeight = remainingScheduledDays(
             month: month,
             pacing: pacing,
+            customWorkDays: customWorkDays,
             timeZone: timeZone,
             after: now
         )

@@ -485,6 +485,11 @@ private struct ClientDetailView: View {
                 }
                 .padding(.bottom, 14)
 
+                if currentPacing == .custom {
+                    workDayPicker
+                        .padding(.bottom, 14)
+                }
+
                 Divider()
 
                 Text(pacingCaption)
@@ -500,6 +505,7 @@ private struct ClientDetailView: View {
         HStack(alignment: .top, spacing: 14) {
             pacingOption(.weekdays, title: "Weekdays only")
             pacingOption(.calendarDays, title: "Every day")
+            pacingOption(.custom, title: "Custom")
         }
         .fixedSize(horizontal: true, vertical: false)
     }
@@ -507,11 +513,73 @@ private struct ClientDetailView: View {
     private func pacingOption(_ mode: PacingMode, title: LocalizedStringKey) -> some View {
         PacingOptionButton(
             title: title,
-            mode: mode,
+            workIndices: previewIndices(for: mode),
             isSelected: currentPacing == mode
         ) {
             pacingBinding.wrappedValue = mode
         }
+    }
+
+    /// Preview-space work days (0 = Monday … 6 = Sunday) for an option's mini
+    /// chart. The custom option previews the client's stored selection.
+    private func previewIndices(for mode: PacingMode) -> Set<Int> {
+        let custom = appState.config.client(id: client.id)?.customWorkDays
+        return Set(mode.workWeekdays(custom: custom).map { $0 == 1 ? 6 : $0 - 2 })
+    }
+
+    /// One toggle per weekday, Monday-first to match the previews. At least
+    /// one work day always stays selected — a goal needs a schedule.
+    private var workDayPicker: some View {
+        HStack(spacing: 6) {
+            Text("Work days")
+                .foregroundStyle(.secondary)
+                .padding(.trailing, 6)
+            ForEach(0..<7, id: \.self) { index in
+                workDayToggle(index: index)
+            }
+        }
+    }
+
+    private func workDayToggle(index: Int) -> some View {
+        let selection = previewIndices(for: .custom)
+        let isOn = selection.contains(index)
+        let isLastRemaining = isOn && selection.count == 1
+        return Button {
+            toggleWorkDay(index: index)
+        } label: {
+            Text(Self.workDayLetters[index])
+                .font(.callout.weight(isOn ? .semibold : .regular))
+                .foregroundStyle(isOn ? Color.white : Color.primary)
+                .frame(width: 26, height: 26)
+                .background(Circle().fill(isOn ? Color.accentColor : Color.primary.opacity(0.07)))
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .disabled(isLastRemaining)
+        .help(Self.workDayNames[index])
+        .accessibilityLabel(Self.workDayNames[index])
+        .accessibilityValue(isOn ? "Work day" : "Day off")
+        .accessibilityAddTraits(isOn ? [.isSelected] : [])
+    }
+
+    private static let workDayLetters = ["M", "T", "W", "T", "F", "S", "S"]
+    private static let workDayNames = [
+        "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday",
+    ]
+
+    private func toggleWorkDay(index: Int) {
+        guard var updated = appState.config.client(id: client.id) else { return }
+        // Preview index (0 = Mon … 6 = Sun) → Calendar weekday (1 = Sun … 7 = Sat).
+        let weekday = index == 6 ? 1 : index + 2
+        var days = updated.pacing.workWeekdays(custom: updated.customWorkDays)
+        if days.contains(weekday) {
+            guard days.count > 1 else { return }
+            days.remove(weekday)
+        } else {
+            days.insert(weekday)
+        }
+        updated.customWorkDays = days
+        appState.config.update(updated)
     }
 
     private var currentPacing: PacingMode {
@@ -524,6 +592,8 @@ private struct ClientDetailView: View {
             return "On weekends, the goal line stays flat so days off do not create artificial debt."
         case .calendarDays:
             return "Every day carries the same share of the goal, including weekends."
+        case .custom:
+            return "On non-work days, the goal line stays flat so days off do not create artificial debt."
         }
     }
 
@@ -593,14 +663,15 @@ private struct ClientDetailView: View {
 /// plateau is immediately visible instead of disappearing in a monthly chart.
 private struct PacingOptionButton: View {
     let title: LocalizedStringKey
-    let mode: PacingMode
+    /// Preview-space work days, 0 = Monday … 6 = Sunday.
+    let workIndices: Set<Int>
     let isSelected: Bool
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
             VStack(spacing: 7) {
-                PacingWeekPreview(mode: mode, isSelected: isSelected)
+                PacingWeekPreview(workIndices: workIndices, isSelected: isSelected)
                     .frame(width: 142, height: 78)
 
                 Text(title)
@@ -618,17 +689,20 @@ private struct PacingOptionButton: View {
 }
 
 private struct PacingWeekPreview: View {
-    let mode: PacingMode
+    /// Preview-space work days, 0 = Monday … 6 = Sunday. Work days climb the
+    /// goal line; the rest plateau and get the shaded off-day column.
+    let workIndices: Set<Int>
     let isSelected: Bool
 
     private let dayLabels = ["M", "T", "W", "T", "F", "S", "S"]
 
     private var cumulativeFractions: [CGFloat] {
-        switch mode {
-        case .weekdays:
-            return [0.20, 0.40, 0.60, 0.80, 1.00, 1.00, 1.00]
-        case .calendarDays:
-            return (1...7).map { CGFloat($0) / 7 }
+        let increments = (0..<7).map { workIndices.contains($0) ? 1.0 : 0.0 }
+        let total = max(increments.reduce(0, +), 1)
+        var running = 0.0
+        return increments.map { increment in
+            running += increment
+            return CGFloat(running / total)
         }
     }
 
@@ -640,7 +714,7 @@ private struct PacingWeekPreview: View {
                         Rectangle()
                             .fill(
                                 Color(nsColor: .separatorColor)
-                                    .opacity(index >= 5 ? 0.16 : 0.045)
+                                    .opacity(workIndices.contains(index) ? 0.045 : 0.16)
                             )
                             .frame(maxWidth: .infinity)
                     }
@@ -707,7 +781,7 @@ private struct PacingWeekPreview: View {
                 ForEach(Array(dayLabels.enumerated()), id: \.offset) { index, label in
                     Text(label)
                         .font(.caption2.monospaced())
-                        .foregroundStyle(index >= 5 ? .secondary : .tertiary)
+                        .foregroundStyle(workIndices.contains(index) ? .tertiary : .secondary)
                         .frame(maxWidth: .infinity)
                 }
             }

@@ -5,6 +5,24 @@ enum PacingMode: String, Codable, CaseIterable, Sendable {
     case weekdays
     /// Every calendar day carries equal planned progress.
     case calendarDays
+    /// A per-client selection of work weekdays carries planned progress;
+    /// the chosen days live in `ClientConfig.customWorkDays`.
+    case custom
+
+    /// The scheduled weekdays (Calendar numbering, 1 = Sunday … 7 = Saturday)
+    /// this mode plans progress on. An empty or missing custom selection falls
+    /// back to Monday–Friday rather than producing a goal with no schedule.
+    func workWeekdays(custom: Set<Int>?) -> Set<Int> {
+        switch self {
+        case .weekdays:
+            return [2, 3, 4, 5, 6]
+        case .calendarDays:
+            return [1, 2, 3, 4, 5, 6, 7]
+        case .custom:
+            let days = custom ?? []
+            return days.isEmpty ? [2, 3, 4, 5, 6] : days
+        }
+    }
 }
 
 enum ClientState: String, Sendable {
@@ -30,6 +48,10 @@ struct ClientConfig: Identifiable, Hashable, Codable, Sendable {
     /// Deleted in Toggl but kept locally because historical data exists.
     var isArchivedInToggl: Bool
     var pacing: PacingMode
+    /// Work weekdays (Calendar numbering, 1 = Sunday … 7 = Saturday) used when
+    /// `pacing == .custom`. Optional so configs persisted before this field
+    /// decode cleanly.
+    var customWorkDays: Set<Int>? = nil
     /// Per-month goal versions. A month without an entry inherits the most
     /// recent earlier version ("this month and onward" semantics).
     var goalHistory: [YearMonth: MonthlyGoal]
@@ -47,6 +69,12 @@ struct ClientConfig: Identifiable, Hashable, Codable, Sendable {
 
     var displayName: String {
         displayNameOverride ?? togglName
+    }
+
+    /// The weekdays this client's goal is planned across, with the custom
+    /// selection applied when active.
+    var workWeekdays: Set<Int> {
+        pacing.workWeekdays(custom: customWorkDays)
     }
 
     /// The goal version in effect for the given month: the exact recorded
