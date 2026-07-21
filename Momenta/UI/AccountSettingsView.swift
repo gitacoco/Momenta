@@ -71,17 +71,23 @@ struct AccountSettingsView: View {
     @ViewBuilder
     private func connectSection(errorText: String?) -> some View {
         Section {
-            SecureField("Toggl API token", text: $tokenInput, prompt: Text("Paste your API token"))
-                .onSubmit(connect)
+            LabeledContent("Toggl API token") {
+                HStack(spacing: 8) {
+                    SecureField("API token", text: $tokenInput, prompt: Text("Paste your API token"))
+                        .labelsHidden()
+                        .frame(minWidth: 220)
+                        .onSubmit(connect)
+                    Button("Connect") {
+                        connect()
+                    }
+                    .disabled(tokenInput.trimmingCharacters(in: .whitespaces).isEmpty)
+                }
+            }
             if let errorText {
                 Label(errorText, systemImage: "exclamationmark.triangle")
                     .foregroundStyle(.red)
                     .font(.callout)
             }
-            Button("Connect") {
-                connect()
-            }
-            .disabled(tokenInput.trimmingCharacters(in: .whitespaces).isEmpty)
         } footer: {
             Text("Find the token in Toggl Track under Profile → API Token. It is stored only in the macOS Keychain.")
                 .font(.caption)
@@ -152,7 +158,7 @@ struct AccountSettingsView: View {
     private func iCloudSection(_ sync: ICloudSyncManager) -> some View {
         Section {
             LabeledContent("Status") {
-                HStack(spacing: 7) {
+                HStack(spacing: 8) {
                     if sync.state == .syncing {
                         ProgressView()
                             .controlSize(.small)
@@ -164,6 +170,7 @@ struct AccountSettingsView: View {
                     }
                     Text(sync.state.label)
                         .foregroundStyle(.secondary)
+                    iCloudStatusAction(sync)
                 }
             }
 
@@ -215,27 +222,51 @@ struct AccountSettingsView: View {
                 )
             }
 
-            if sync.isEnabled {
-                HStack {
-                    Button("Retry") {
-                        sync.retry()
-                    }
-                    Button("Stop Using on This Mac") {
-                        sync.stopUsingOnThisMac()
-                    }
-                }
-            } else if account.discoveredSyncedAccount == nil {
-                Button("Sync with iCloud") {
-                    Task { await sync.enable() }
-                }
-                .disabled(account.state == .validating)
-            }
         } header: {
             Text("iCloud Sync")
         } footer: {
             Text("The API token uses iCloud Keychain. Client settings and Logo assets use your private CloudKit database. Stopping on this Mac does not delete the synced credential; disconnecting while sync is enabled removes it from all Macs.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+        }
+    }
+
+    @ViewBuilder
+    private func iCloudStatusAction(_ sync: ICloudSyncManager) -> some View {
+        switch sync.state {
+        case .off:
+            if account.discoveredSyncedAccount == nil {
+                Button("Set Up…") {
+                    Task { await sync.enable() }
+                }
+                .disabled(account.state == .validating)
+            }
+        case .needsAttention:
+            Button("Retry") {
+                if sync.isEnabled {
+                    sync.retry()
+                } else {
+                    Task { await sync.enable() }
+                }
+            }
+            if sync.isEnabled {
+                Menu {
+                    Button("Stop Using on This Mac") {
+                        sync.stopUsingOnThisMac()
+                    }
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+                .accessibilityLabel("More iCloud Sync actions")
+            }
+        case .synced:
+            Button("Stop Using on This Mac") {
+                sync.stopUsingOnThisMac()
+            }
+        case .waitingForAccountConfirmation, .waitingForInitialMerge, .syncing:
+            EmptyView()
         }
     }
 }

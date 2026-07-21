@@ -414,6 +414,13 @@ struct AccountManagerTests {
 }
 
 struct KeychainTokenStoreTests {
+    @Test func keychainErrorsHaveReadableDescriptions() {
+        let error = KeychainError(status: errSecMissingEntitlement)
+
+        #expect(error.localizedDescription == "This build of Momenta isn’t entitled to use iCloud Keychain.")
+        #expect(!error.localizedDescription.contains("Momenta.KeychainError"))
+    }
+
     /// Round-trips against the real Keychain with a test-specific service so
     /// it never collides with the app's production item.
     @Test func saveLoadOverwriteDelete() throws {

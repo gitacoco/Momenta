@@ -29,8 +29,23 @@ protocol SynchronizableTokenStore: TokenStore {
     func delete(scope: TokenItemScope) throws
 }
 
-struct KeychainError: Error, Equatable {
+struct KeychainError: Error, Equatable, LocalizedError {
     var status: OSStatus
+
+    var errorDescription: String? {
+        switch status {
+        case errSecMissingEntitlement:
+            return "This build of Momenta isn’t entitled to use iCloud Keychain."
+        case errSecInteractionNotAllowed:
+            return "The macOS Keychain is locked or unavailable. Unlock this Mac, then try again."
+        case errSecAuthFailed:
+            return "macOS couldn’t authorize access to the Keychain."
+        default:
+            let detail = SecCopyErrorMessageString(status, nil) as String?
+            return detail.map { "Momenta couldn’t access the macOS Keychain. \($0)" }
+                ?? "Momenta couldn’t access the macOS Keychain."
+        }
+    }
 }
 
 /// Generic-password Keychain storage. The token never touches UserDefaults,
