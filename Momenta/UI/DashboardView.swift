@@ -44,31 +44,53 @@ struct DashboardView: View {
     private var header: some View {
         @Bindable var appState = appState
         return HStack(spacing: 8) {
-            Button {
-                appState.stepBackward()
-            } label: {
-                Image(systemName: "chevron.left")
-            }
-            .buttonStyle(.borderless)
-            .disabled(!appState.canGoBackward)
+            HStack(spacing: 0) {
+                Button {
+                    appState.stepBackward()
+                } label: {
+                    Image(systemName: "chevron.left")
+                }
+                .buttonStyle(.borderless)
+                .disabled(!appState.canGoBackward)
 
-            Text(navTitle)
-                .font(.headline)
-                .frame(minWidth: 110)
+                Text(navTitle)
+                    .font(.headline)
+                    // Widest possible title is a boundary-straddling week range
+                    // (e.g. "Aug 28 – Sep 3", ~97pt); reserve just past it so the
+                    // arrows never shift as the title changes.
+                    .frame(minWidth: 100)
 
-            Button {
-                appState.stepForward()
-            } label: {
-                Image(systemName: "chevron.right")
+                Button {
+                    appState.stepForward()
+                } label: {
+                    Image(systemName: "chevron.right")
+                }
+                .buttonStyle(.borderless)
+                .disabled(!appState.canGoForward)
+
+                // BON-35: one-click return to the live period. Only meaningful
+                // while historical (canGoForward), but kept in the layout via
+                // opacity so the title and chevrons never shift as it appears.
+                Button {
+                    appState.resetReferenceToNow()
+                } label: {
+                    Image(systemName: "arrow.right.to.line")
+                }
+                .buttonStyle(.borderless)
+                .help("Back to Today")
+                .accessibilityLabel("Back to Today")
+                .padding(.leading, 8)
+                .opacity(appState.canGoForward ? 1 : 0)
+                .disabled(!appState.canGoForward)
+                .allowsHitTesting(appState.canGoForward)
+                .accessibilityHidden(!appState.canGoForward)
             }
-            .buttonStyle(.borderless)
-            .disabled(!appState.canGoForward)
 
             Spacer()
 
-            Text("Display goals in")
-                .font(.callout)
-                .foregroundStyle(.secondary)
+            // No visible caption — the clock/$ glyphs read as hours vs revenue
+            // on their own. The Picker keeps "Display goals in" as its
+            // (hidden) accessibility label for VoiceOver.
             Picker("Display goals in", selection: $appState.displayUnit) {
                 Image(systemName: "clock").tag(DisplayUnit.hours)
                 Image(systemName: "dollarsign").tag(DisplayUnit.revenue)

@@ -14,7 +14,7 @@ enum Format {
     }
 
     static func monthTitle(_ month: YearMonth, timeZone: TimeZone) -> String {
-        formatted(month.start(in: timeZone), format: "MMMM yyyy", timeZone: timeZone)
+        formatted(month.start(in: timeZone), format: "MMM yyyy", timeZone: timeZone)
     }
 
     /// Bare month name for the Overall label, e.g. "July".
