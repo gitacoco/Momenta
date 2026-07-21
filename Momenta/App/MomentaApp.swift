@@ -29,6 +29,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    func applicationDidBecomeActive(_ notification: Notification) {
+        Task { @MainActor in
+            await AppState.shared.applicationDidBecomeActive()
+        }
+    }
+
     /// Momenta is a menu bar app, so closing (or recreating) its only regular
     /// window must not terminate the process that owns the status item.
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {

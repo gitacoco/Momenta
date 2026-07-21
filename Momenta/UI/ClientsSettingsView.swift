@@ -386,7 +386,7 @@ private struct ClientDetailView: View {
         guard var updated = appState.config.client(id: client.id) else { return }
         do {
             updated.logoFileName = try LogoStore.importLogo(from: url, for: client.id)
-            appState.config.update(updated)
+            appState.config.update(updated, logoContentChanged: true)
         } catch {
             logoImportError = error.localizedDescription
         }
@@ -408,7 +408,7 @@ private struct ClientDetailView: View {
             LogoStore.deleteLogo(named: fileName)
         }
         updated.logoFileName = nil
-        appState.config.update(updated)
+        appState.config.update(updated, logoContentChanged: true)
     }
 
     // MARK: Needs setup (itemized, click-to-focus)

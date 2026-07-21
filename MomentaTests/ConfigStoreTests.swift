@@ -106,6 +106,33 @@ struct ConfigStoreTests {
         #expect(store.clients[0].isArchivedInToggl)
     }
 
+    @Test func onlyUserAuthoredMutationsEmitUploadChanges() {
+        let store = ConfigStore(defaults: freshDefaults())
+        var userChanges = 0
+        var reconciliations = 0
+        store.onUserChange = { _ in userChanges += 1 }
+        store.onTogglReconciliation = { reconciliations += 1 }
+
+        store.merge(workspaces: workspaces, togglClients: [
+            TogglClientDTO(id: 7, wid: 101, name: "Acme", archived: false),
+        ])
+        #expect(userChanges == 0)
+        #expect(reconciliations == 1)
+
+        var edited = store.clients[0]
+        edited.isEnabled = true
+        store.update(edited)
+        #expect(userChanges == 1)
+
+        let projected = SyncedConfigPayload(
+            clients: [7: SyncedClientConfig(client: edited)],
+            order: [7]
+        )
+        store.applySyncedPayload(projected)
+        #expect(userChanges == 1)
+        #expect(reconciliations == 1)
+    }
+
     // MARK: Ordering
 
     @Test func moveReordersClientsAndPersists() {

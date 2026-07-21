@@ -4,6 +4,10 @@ import Observation
 /// Non-secret account info shown on the Account page. Persisted in
 /// UserDefaults; the API token itself lives only in the Keychain.
 struct AccountSnapshot: Codable, Equatable, Sendable {
+    /// Stable Toggl identity used to scope CloudKit records and to ensure a
+    /// synchronizable Keychain item has not changed accounts underneath an
+    /// existing local snapshot. Optional for snapshots written by v0.1.
+    var togglUserID: Int?
     var fullname: String
     var email: String
     var workspaces: [TogglWorkspace]
@@ -14,6 +18,7 @@ struct AccountSnapshot: Codable, Equatable, Sendable {
     var organizations: [TogglOrganization]?
 
     init(
+        togglUserID: Int? = nil,
         fullname: String,
         email: String,
         workspaces: [TogglWorkspace],
@@ -21,6 +26,7 @@ struct AccountSnapshot: Codable, Equatable, Sendable {
         defaultWorkspaceId: Int? = nil,
         organizations: [TogglOrganization]? = nil
     ) {
+        self.togglUserID = togglUserID
         self.fullname = fullname
         self.email = email
         self.workspaces = workspaces
@@ -60,8 +66,35 @@ final class AccountManager {
         case failed(TogglAPIError)
     }
 
+    struct DiscoveredSyncedAccount: Equatable, Sendable {
+        var togglUserID: Int
+        var fullname: String
+        var email: String
+    }
+
+    enum CredentialAttention: Equatable, Sendable {
+        case conflictingLocalAndSyncedTokens
+        case syncedTokenMissing
+        case accountMismatch(expectedEmail: String, foundEmail: String)
+        case operation(String)
+
+        var message: String {
+            switch self {
+            case .conflictingLocalAndSyncedTokens:
+                return "This Mac and iCloud contain different Toggl credentials. Reconnect the account you want to use."
+            case .syncedTokenMissing:
+                return "The iCloud Keychain credential is no longer available. Reconnect or stop using iCloud sync on this Mac."
+            case .accountMismatch(let expectedEmail, let foundEmail):
+                return "iCloud Keychain now contains \(foundEmail), but this Mac is connected as \(expectedEmail). Confirm the account before continuing."
+            case .operation(let message):
+                return message
+            }
+        }
+    }
+
     private static let snapshotKey = "toggl.accountSnapshot"
     private static let lastSyncKey = "toggl.lastSyncAt"
+    private static let iCloudCredentialKey = "momenta.iCloud.credentialEnabled"
 
     private let tokenStore: any TokenStore
     private let transport: any HTTPTransport
@@ -69,9 +102,18 @@ final class AccountManager {
 
     private(set) var state: ConnectionState = .disconnected
     private(set) var lastSyncAt: Date?
+    private(set) var usesICloudCredential = false
+    private(set) var discoveredSyncedAccount: DiscoveredSyncedAccount?
+    private(set) var credentialAttention: CredentialAttention?
     /// Bumped on every connect/disconnect so consumers holding token-bound
     /// resources (API clients, caches) know to rebuild them.
     private(set) var generation = 0
+    /// A token becomes usable by data providers only after the account
+    /// identity has been validated for the current process. It is never
+    /// persisted outside Keychain.
+    private var validatedToken: String?
+    private var pendingSyncedToken: String?
+    private var pendingSyncedMe: TogglMe?
 
     init(
         tokenStore: any TokenStore = KeychainTokenStore(),
@@ -81,15 +123,35 @@ final class AccountManager {
         self.tokenStore = tokenStore
         self.transport = transport
         self.defaults = defaults
+        usesICloudCredential = defaults.bool(forKey: Self.iCloudCredentialKey)
 
         // Relaunch: connected as long as both the token and the snapshot
-        // survived. No network call here; the next refresh validates naturally.
-        if (try? tokenStore.load()) != nil,
+        // survived. A synchronizable token is held back from API clients until
+        // the launch/foreground identity check validates it against /me.
+        let restoredToken = Self.loadRestoredToken(
+            from: tokenStore,
+            usesICloudCredential: usesICloudCredential
+        )
+        if restoredToken != nil,
            let data = defaults.data(forKey: Self.snapshotKey),
            let snapshot = try? JSONDecoder().decode(AccountSnapshot.self, from: data) {
             state = .connected(snapshot)
+            if !usesICloudCredential {
+                validatedToken = restoredToken
+            }
         }
         lastSyncAt = defaults.object(forKey: Self.lastSyncKey) as? Date
+    }
+
+    private static func loadRestoredToken(
+        from store: any TokenStore,
+        usesICloudCredential: Bool
+    ) -> String? {
+        if usesICloudCredential,
+           let store = store as? any SynchronizableTokenStore {
+            return try? store.load(scope: .synchronizable)
+        }
+        return try? store.load()
     }
 
     var isConnected: Bool {
@@ -110,8 +172,9 @@ final class AccountManager {
             // Plan metadata is supplemental. A temporary failure here must
             // not reject an otherwise valid account connection.
             let organizations = try? await client.organizations()
-            try tokenStore.save(trimmed)
+            try saveActiveToken(trimmed)
             let snapshot = AccountSnapshot(
+                togglUserID: me.id,
                 fullname: me.fullname,
                 email: me.email,
                 workspaces: workspaces,
@@ -120,6 +183,11 @@ final class AccountManager {
                 organizations: organizations
             )
             persist(snapshot)
+            validatedToken = trimmed
+            discoveredSyncedAccount = nil
+            pendingSyncedToken = nil
+            pendingSyncedMe = nil
+            credentialAttention = nil
             generation += 1
             state = .connected(snapshot)
         } catch let error as TogglAPIError {
@@ -154,13 +222,243 @@ final class AccountManager {
         }
     }
 
+    // MARK: iCloud credential lifecycle
+
+    /// Migrates a connected local credential to a synchronizable Keychain
+    /// item. On a new Mac, discovers the synced account and pauses for an
+    /// explicit confirmation instead of silently adopting it.
+    @discardableResult
+    func enableICloudCredentialSync() async -> Bool {
+        guard let store = tokenStore as? any SynchronizableTokenStore else {
+            credentialAttention = .operation("This Keychain store does not support iCloud synchronization.")
+            return false
+        }
+
+        do {
+            let local = try store.load(scope: .local)
+            let synced = try store.load(scope: .synchronizable)
+            if let local, let synced, local != synced {
+                validatedToken = nil
+                credentialAttention = .conflictingLocalAndSyncedTokens
+                return false
+            }
+
+            if case .connected(let snapshot) = state,
+               let token = local ?? synced {
+                let me = try await TogglAPIClient(token: token, transport: transport).me()
+                guard accountMatches(snapshot: snapshot, me: me) else {
+                    validatedToken = nil
+                    credentialAttention = .accountMismatch(
+                        expectedEmail: snapshot.email,
+                        foundEmail: me.email
+                    )
+                    return false
+                }
+
+                if synced == nil {
+                    try store.save(token, scope: .synchronizable)
+                }
+                guard try store.load(scope: .synchronizable) == token else {
+                    throw KeychainError(status: errSecDecode)
+                }
+                // Validate the exact item that will survive migration before
+                // removing the only known-good legacy credential.
+                let verifiedMe = try await TogglAPIClient(token: token, transport: transport).me()
+                guard verifiedMe.id == me.id else {
+                    throw TogglAPIError.other("The iCloud Keychain credential changed during migration.")
+                }
+                try store.delete(scope: .local)
+
+                usesICloudCredential = true
+                defaults.set(true, forKey: Self.iCloudCredentialKey)
+                validatedToken = token
+                var updated = snapshot
+                updated.togglUserID = me.id
+                updated.fullname = me.fullname
+                updated.email = me.email
+                persist(updated)
+                state = .connected(updated)
+                credentialAttention = nil
+                generation += 1
+                return true
+            }
+
+            guard let synced else {
+                credentialAttention = .operation("No Toggl credential was found in iCloud Keychain.")
+                return false
+            }
+            return await discoverSyncedAccount(token: synced)
+        } catch let error as TogglAPIError {
+            credentialAttention = .operation(error.errorDescription ?? "Could not validate the Toggl account.")
+        } catch {
+            credentialAttention = .operation(error.localizedDescription)
+        }
+        return false
+    }
+
+    /// Completes new-Mac bootstrap only after the user has seen and accepted
+    /// the Toggl identity discovered from the synchronized token.
+    func confirmDiscoveredSyncedAccount() async -> Bool {
+        guard let token = pendingSyncedToken, let me = pendingSyncedMe else { return false }
+        state = .validating
+        do {
+            let client = TogglAPIClient(token: token, transport: transport)
+            let workspaces = try await client.workspaces()
+            let organizations = try? await client.organizations()
+            let snapshot = AccountSnapshot(
+                togglUserID: me.id,
+                fullname: me.fullname,
+                email: me.email,
+                workspaces: workspaces,
+                connectedAt: Date(),
+                defaultWorkspaceId: me.defaultWorkspaceId,
+                organizations: organizations
+            )
+            usesICloudCredential = true
+            defaults.set(true, forKey: Self.iCloudCredentialKey)
+            persist(snapshot)
+            validatedToken = token
+            pendingSyncedToken = nil
+            pendingSyncedMe = nil
+            discoveredSyncedAccount = nil
+            credentialAttention = nil
+            generation += 1
+            state = .connected(snapshot)
+            return true
+        } catch let error as TogglAPIError {
+            state = .failed(error)
+        } catch {
+            state = .failed(.other(error.localizedDescription))
+        }
+        return false
+    }
+
+    func cancelDiscoveredSyncedAccount() {
+        pendingSyncedToken = nil
+        pendingSyncedMe = nil
+        discoveredSyncedAccount = nil
+        credentialAttention = nil
+        state = .disconnected
+    }
+
+    /// Stops Momenta using the synchronizable item on this Mac without
+    /// deleting it from iCloud. A verified local copy is created first so the
+    /// current connection remains usable offline and after relaunch.
+    func stopUsingICloudCredentialOnThisMac() throws {
+        guard let store = tokenStore as? any SynchronizableTokenStore,
+              let token = try store.load(scope: .synchronizable)
+        else { throw KeychainError(status: errSecItemNotFound) }
+        try store.save(token, scope: .local)
+        guard try store.load(scope: .local) == token else {
+            throw KeychainError(status: errSecDecode)
+        }
+        usesICloudCredential = false
+        defaults.set(false, forKey: Self.iCloudCredentialKey)
+        validatedToken = token
+        credentialAttention = nil
+        generation += 1
+    }
+
+    /// Launch/foreground gate for a credential that iCloud may have replaced
+    /// while the app was not active. No data provider can obtain the token
+    /// until this check succeeds.
+    func validateICloudCredentialForForeground() async {
+        guard usesICloudCredential,
+              let store = tokenStore as? any SynchronizableTokenStore
+        else { return }
+        do {
+            guard let token = try store.load(scope: .synchronizable) else {
+                validatedToken = nil
+                credentialAttention = .syncedTokenMissing
+                generation += 1
+                return
+            }
+            guard case .connected(let snapshot) = state else {
+                if discoveredSyncedAccount == nil {
+                    _ = await discoverSyncedAccount(token: token)
+                }
+                return
+            }
+            let me = try await TogglAPIClient(token: token, transport: transport).me()
+            guard accountMatches(snapshot: snapshot, me: me) else {
+                validatedToken = nil
+                credentialAttention = .accountMismatch(
+                    expectedEmail: snapshot.email,
+                    foundEmail: me.email
+                )
+                generation += 1
+                return
+            }
+            var updated = snapshot
+            updated.togglUserID = me.id
+            updated.fullname = me.fullname
+            updated.email = me.email
+            persist(updated)
+            state = .connected(updated)
+            validatedToken = token
+            credentialAttention = nil
+            generation += 1
+        } catch let error as TogglAPIError {
+            // Offline and transient failures preserve cached/local behavior,
+            // but the unvalidated token remains unavailable to API clients.
+            validatedToken = nil
+            credentialAttention = .operation(error.errorDescription ?? "Could not validate the Toggl account.")
+        } catch {
+            validatedToken = nil
+            credentialAttention = .operation(error.localizedDescription)
+        }
+    }
+
+    private func discoverSyncedAccount(token: String) async -> Bool {
+        do {
+            let me = try await TogglAPIClient(token: token, transport: transport).me()
+            pendingSyncedToken = token
+            pendingSyncedMe = me
+            discoveredSyncedAccount = DiscoveredSyncedAccount(
+                togglUserID: me.id,
+                fullname: me.fullname,
+                email: me.email
+            )
+            credentialAttention = nil
+            state = .disconnected
+        } catch let error as TogglAPIError {
+            credentialAttention = .operation(error.errorDescription ?? "Could not validate the synced Toggl account.")
+        } catch {
+            credentialAttention = .operation(error.localizedDescription)
+        }
+        return false
+    }
+
+    private func accountMatches(snapshot: AccountSnapshot, me: TogglMe) -> Bool {
+        if let togglUserID = snapshot.togglUserID {
+            return togglUserID == me.id
+        }
+        // One-time migration for pre-user-ID snapshots. A local token may be
+        // trusted only when the account identity shown to the user still
+        // matches; the stable ID is persisted immediately afterward.
+        return snapshot.email.localizedCaseInsensitiveCompare(me.email) == .orderedSame
+    }
+
     /// Removes the token and account info. Clearing cached month data is the
     /// caller's choice, made in the confirmation dialog.
     func disconnect() {
-        try? tokenStore.delete()
+        if let store = tokenStore as? any SynchronizableTokenStore {
+            // A Mac that is not participating in sync must never delete an
+            // unrelated synchronizable credential it merely discovered.
+            try? store.delete(scope: usesICloudCredential ? .any : .local)
+        } else {
+            try? tokenStore.delete()
+        }
         defaults.removeObject(forKey: Self.snapshotKey)
         defaults.removeObject(forKey: Self.lastSyncKey)
+        defaults.removeObject(forKey: Self.iCloudCredentialKey)
         lastSyncAt = nil
+        usesICloudCredential = false
+        validatedToken = nil
+        pendingSyncedToken = nil
+        pendingSyncedMe = nil
+        discoveredSyncedAccount = nil
+        credentialAttention = nil
         generation += 1
         state = .disconnected
     }
@@ -173,8 +471,17 @@ final class AccountManager {
 
     /// An API client bound to the stored token, when connected.
     func apiClient() -> TogglAPIClient? {
-        guard let token = try? tokenStore.load() else { return nil }
+        guard case .connected = state, let token = validatedToken else { return nil }
         return TogglAPIClient(token: token, transport: transport)
+    }
+
+    private func saveActiveToken(_ token: String) throws {
+        if usesICloudCredential,
+           let store = tokenStore as? any SynchronizableTokenStore {
+            try store.save(token, scope: .synchronizable)
+        } else {
+            try tokenStore.save(token)
+        }
     }
 
     private func persist(_ snapshot: AccountSnapshot) {

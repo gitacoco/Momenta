@@ -7,10 +7,17 @@ import Observation
 @MainActor
 @Observable
 final class ConfigStore {
+    enum UserChange: Sendable {
+        case client(ClientConfig, logoContentChanged: Bool)
+        case order([Int])
+    }
+
     private static let storageKey = "momenta.clientConfigs"
 
     private let defaults: UserDefaults
     private(set) var clients: [ClientConfig] = []
+    @ObservationIgnored var onUserChange: (@MainActor (UserChange) -> Void)?
+    @ObservationIgnored var onTogglReconciliation: (@MainActor () -> Void)?
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -22,10 +29,15 @@ final class ConfigStore {
 
     // MARK: Updates
 
-    func update(_ config: ClientConfig) {
+    func update(_ config: ClientConfig, logoContentChanged: Bool = false) {
         guard let index = clients.firstIndex(where: { $0.id == config.id }) else { return }
+        let old = clients[index]
         clients[index] = config
         persist()
+        onUserChange?(.client(
+            config,
+            logoContentChanged: logoContentChanged || old.logoFileName != config.logoFileName
+        ))
     }
 
     func client(id: Int) -> ClientConfig? {
@@ -107,6 +119,7 @@ final class ConfigStore {
 
         clients = merged
         persist()
+        onTogglReconciliation?()
     }
 
     /// Reorders a displayed subset (one sidebar section) by drag and drop.
@@ -123,6 +136,38 @@ final class ConfigStore {
                   let replacement = client(id: nextID) else { return existing }
             return replacement
         }
+        persist()
+        onUserChange?(.order(clients.map(\.id)))
+    }
+
+    /// Projects the complete sync shadow onto clients currently known from
+    /// Toggl. Unknown payload entries remain in the shadow owned by the sync
+    /// manager and are intentionally not represented here yet.
+    func applySyncedPayload(
+        _ payload: SyncedConfigPayload,
+        localLogoFileNames: [Int: String] = [:]
+    ) {
+        let ranks = Dictionary(uniqueKeysWithValues: payload.order.enumerated().map { ($0.element, $0.offset) })
+        clients = clients.map { client in
+            guard let synced = payload.clients[client.id] else { return client }
+            let localLogo: String?
+            if synced.logoRevision == nil {
+                localLogo = nil
+            } else {
+                localLogo = localLogoFileNames[client.id] ?? client.logoFileName
+            }
+            return synced.applying(to: client, localLogoFileName: localLogo)
+        }
+        clients = clients.enumerated().sorted { lhs, rhs in
+            let lhsRank = ranks[lhs.element.id]
+            let rhsRank = ranks[rhs.element.id]
+            switch (lhsRank, rhsRank) {
+            case (let lhs?, let rhs?): return lhs < rhs
+            case (.some, nil): return true
+            case (nil, .some): return false
+            case (nil, nil): return lhs.offset < rhs.offset
+            }
+        }.map(\.element)
         persist()
     }
 

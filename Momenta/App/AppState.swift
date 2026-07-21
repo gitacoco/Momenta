@@ -13,7 +13,10 @@ enum SettingsDestination: Equatable, Sendable {
 final class AppState {
     /// Single instance shared by the status item (AppKit) and the SwiftUI
     /// Settings scene.
-    static let shared = AppState(provider: MockDataProvider())
+    static let shared = AppState(
+        provider: MockDataProvider(),
+        cloudDatabase: CloudKitSyncDatabase()
+    )
 
     /// Demo data source used before any Toggl account is connected.
     private let fallbackProvider: any DataProvider
@@ -21,6 +24,7 @@ final class AppState {
     private var togglProviderGeneration = -1
     let account: AccountManager
     let config: ConfigStore
+    let iCloudSync: ICloudSyncManager?
     private let snapshotCache: SnapshotCache
     private let defaults: UserDefaults
 
@@ -142,6 +146,7 @@ final class AppState {
         config: ConfigStore = ConfigStore(),
         snapshotCache: SnapshotCache = SnapshotCache(),
         defaults: UserDefaults = .standard,
+        cloudDatabase: (any CloudSyncDatabase)? = nil,
         autoRefresh: Bool = true
     ) {
         self.fallbackProvider = provider
@@ -149,6 +154,16 @@ final class AppState {
         self.config = config
         self.snapshotCache = snapshotCache
         self.defaults = defaults
+        if let cloudDatabase {
+            iCloudSync = ICloudSyncManager(
+                account: account,
+                config: config,
+                database: cloudDatabase,
+                defaults: defaults
+            )
+        } else {
+            iCloudSync = nil
+        }
         var settings = DisplaySettings()
         if let data = defaults.data(forKey: Self.displaySettingsKey),
            let decoded = try? JSONDecoder().decode(DisplaySettings.self, from: data) {
@@ -169,6 +184,11 @@ final class AppState {
                 await self.refreshIfNeeded()
             }
         }
+    }
+
+    func applicationDidBecomeActive() async {
+        await iCloudSync?.handleForeground()
+        await refreshIfNeeded()
     }
 
     isolated deinit {
@@ -300,7 +320,15 @@ final class AppState {
     /// - disconnected but real configs exist: nil — no fetching, cached
     ///   snapshots stay visible.
     private func activeProvider() -> (any DataProvider)? {
-        if account.isConnected, let api = account.apiClient() {
+        if account.isConnected {
+            // A synchronizable credential is deliberately unavailable until
+            // the foreground /me check succeeds. Do not mistake that short
+            // validation window for demo mode and persist mock snapshots as
+            // real connected-account data.
+            guard let api = account.apiClient() else {
+                togglProvider = nil
+                return nil
+            }
             if togglProvider == nil || togglProviderGeneration != account.generation {
                 togglProvider = TogglDataProvider(api: api)
                 togglProviderGeneration = account.generation

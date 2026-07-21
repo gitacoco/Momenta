@@ -8,6 +8,7 @@ struct AccountSettingsView: View {
     @State private var showDisconnectDialog = false
 
     private var account: AccountManager { appState.account }
+    private var iCloudSync: ICloudSyncManager? { appState.iCloudSync }
 
     var body: some View {
         Form {
@@ -26,25 +27,42 @@ struct AccountSettingsView: View {
             case .connected(let snapshot):
                 connectedSection(snapshot)
             }
+            if let iCloudSync {
+                iCloudSection(iCloudSync)
+            }
         }
         .formStyle(.grouped)
         .task {
             await account.refreshMetadataIfNeeded()
         }
         .confirmationDialog(
-            "Disconnect from Toggl?",
+            account.usesICloudCredential ? "Disconnect on all Macs?" : "Disconnect from Toggl?",
             isPresented: $showDisconnectDialog
         ) {
             Button("Disconnect, Keep Cached Data") {
-                account.disconnect()
+                disconnect(clearCache: false)
             }
             Button("Disconnect and Clear Cache", role: .destructive) {
-                account.disconnect()
-                appState.clearCache()
+                disconnect(clearCache: true)
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("The API token is removed from the Keychain either way. Cached month data can be kept for offline viewing.")
+            if account.usesICloudCredential {
+                Text("The synchronizable API token will be deleted from iCloud Keychain and the deletion will propagate to your other Macs. Cached month data can be kept for offline viewing.")
+            } else {
+                Text("The API token is removed from this Mac’s Keychain either way. Cached month data can be kept for offline viewing.")
+            }
+        }
+    }
+
+    private func disconnect(clearCache: Bool) {
+        if let iCloudSync, account.usesICloudCredential {
+            iCloudSync.disconnectOnAllMacs()
+        } else {
+            account.disconnect()
+        }
+        if clearCache {
+            appState.clearCache()
         }
     }
 
@@ -125,6 +143,99 @@ struct AccountSettingsView: View {
                     Label(workspace.name, systemImage: "rectangle.3.group")
                 }
             }
+        }
+    }
+
+    // MARK: iCloud sync
+
+    @ViewBuilder
+    private func iCloudSection(_ sync: ICloudSyncManager) -> some View {
+        Section {
+            LabeledContent("Status") {
+                HStack(spacing: 7) {
+                    if sync.state == .syncing {
+                        ProgressView()
+                            .controlSize(.small)
+                    } else {
+                        Circle()
+                            .fill(sync.state == .synced ? Color.green : Color.secondary)
+                            .frame(width: 8, height: 8)
+                            .accessibilityHidden(true)
+                    }
+                    Text(sync.state.label)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            if let discovered = account.discoveredSyncedAccount {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Toggl account found in iCloud")
+                        .font(.headline)
+                    Text("\(discovered.fullname) · \(discovered.email)")
+                        .foregroundStyle(.secondary)
+                    Text("Confirm before this Mac uses the synced credential or downloads financial settings.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    HStack {
+                        Button("Use This Account") {
+                            Task { await sync.confirmDiscoveredAccount() }
+                        }
+                        .buttonStyle(.borderedProminent)
+                        Button("Cancel") {
+                            sync.cancelDiscoveredAccount()
+                        }
+                    }
+                }
+            } else if sync.state == .waitingForInitialMerge {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("This Mac and iCloud both have client settings.")
+                    Text("Momenta will preserve non-conflicting clients and goal months; values already accepted by iCloud win same-field conflicts.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    HStack {
+                        Button("Merge with iCloud") {
+                            Task { await sync.confirmInitialMerge() }
+                        }
+                        .buttonStyle(.borderedProminent)
+                        Button("Not Now") {
+                            sync.cancelInitialMerge()
+                        }
+                    }
+                }
+            } else if let message = sync.attentionMessage {
+                Label(message, systemImage: "exclamationmark.triangle")
+                    .foregroundStyle(.orange)
+                    .font(.callout)
+            }
+
+            if let lastSuccess = sync.lastSuccessfulSyncAt {
+                LabeledContent(
+                    "Last successful sync",
+                    value: lastSuccess.formatted(date: .abbreviated, time: .shortened)
+                )
+            }
+
+            if sync.isEnabled {
+                HStack {
+                    Button("Retry") {
+                        sync.retry()
+                    }
+                    Button("Stop Using on This Mac") {
+                        sync.stopUsingOnThisMac()
+                    }
+                }
+            } else if account.discoveredSyncedAccount == nil {
+                Button("Sync with iCloud") {
+                    Task { await sync.enable() }
+                }
+                .disabled(account.state == .validating)
+            }
+        } header: {
+            Text("iCloud Sync")
+        } footer: {
+            Text("The API token uses iCloud Keychain. Client settings and Logo assets use your private CloudKit database. Stopping on this Mac does not delete the synced credential; disconnecting while sync is enabled removes it from all Macs.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
     }
 }

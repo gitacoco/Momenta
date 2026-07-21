@@ -35,6 +35,14 @@ enum LogoStore {
         try? FileManager.default.removeItem(at: url(for: fileName))
     }
 
+    /// Atomically installs bytes fetched from a CloudKit asset. The file name
+    /// is device-local and never appears in the synced config payload.
+    static func installSyncedLogo(_ data: Data, for clientID: Int) throws -> String {
+        let fileName = "client-\(clientID)-icloud"
+        try data.write(to: url(for: fileName), options: .atomic)
+        return fileName
+    }
+
     static func image(named fileName: String?) -> NSImage? {
         guard let fileName else { return nil }
         return NSImage(contentsOf: url(for: fileName))
