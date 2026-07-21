@@ -62,6 +62,25 @@ enum MenuBarVisualization: String, Codable, CaseIterable, Identifiable, Sendable
     }
 }
 
+/// How the app decides when to pull fresh data. Manual mode protects Toggl's
+/// tight free-plan quota (30 requests/hour); interval mode spends it on a
+/// predictable schedule the user picks.
+enum RefreshMode: String, Codable, CaseIterable, Identifiable, Sendable {
+    case onOpen
+    case interval
+    case manual
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .onOpen: return "When the popover opens"
+        case .interval: return "On a set interval"
+        case .manual: return "Manually only"
+        }
+    }
+}
+
 /// Chart/metric unit toggle. View state only, never persisted.
 enum DisplayUnit: String, CaseIterable, Identifiable, Sendable {
     case revenue
@@ -84,10 +103,20 @@ struct DisplaySettings: Hashable, Codable, Sendable {
     var showsOverallPercentage: Bool = false
     /// nil follows the system time zone.
     var timeZoneIdentifier: String?
-    /// Whether opening the popover triggers a (throttled) refresh, or data
-    /// only moves on the manual refresh button. Manual mode protects Toggl's
-    /// tight free-plan quota (30 requests/hour) from unintentional queries.
-    var autoRefreshOnOpen: Bool = true
+    /// When the app pulls fresh data. See `RefreshMode`.
+    var refreshMode: RefreshMode = .onOpen
+    /// Minutes between automatic refreshes while in `.interval` mode. Kept
+    /// inside `refreshIntervalRange` so the schedule can never outrun Toggl's
+    /// 30 requests/hour quota.
+    var refreshIntervalMinutes: Int = defaultRefreshIntervalMinutes
+
+    /// Allowed spacing for interval refreshes, in minutes.
+    static let refreshIntervalRange: ClosedRange<Int> = 5...240
+    static let defaultRefreshIntervalMinutes = 15
+
+    /// Passive (non-user-initiated) fetches — popover open, day rollover,
+    /// week-neighbor prep — happen in every mode except manual.
+    var allowsPassiveFetch: Bool { refreshMode != .manual }
 
     init() {}
 
@@ -99,6 +128,9 @@ struct DisplaySettings: Hashable, Codable, Sendable {
         // Read-only compatibility with settings written before object modes.
         case perClientSplit
         case timeZoneIdentifier
+        case refreshMode
+        case refreshIntervalMinutes
+        // Read-only compatibility with the boolean that predated RefreshMode.
         case autoRefreshOnOpen
     }
 
@@ -120,8 +152,21 @@ struct DisplaySettings: Hashable, Codable, Sendable {
             (try? container.decode(Bool.self, forKey: .showsOverallPercentage)) ?? false
 
         timeZoneIdentifier = try? container.decode(String.self, forKey: .timeZoneIdentifier)
-        autoRefreshOnOpen =
-            (try? container.decode(Bool.self, forKey: .autoRefreshOnOpen)) ?? true
+
+        // Prefer the new mode; fall back to the legacy boolean so settings
+        // written before RefreshMode keep on-open vs. manual behavior.
+        if let mode = try? container.decode(RefreshMode.self, forKey: .refreshMode) {
+            refreshMode = mode
+        } else {
+            let legacyAutoRefresh =
+                (try? container.decode(Bool.self, forKey: .autoRefreshOnOpen)) ?? true
+            refreshMode = legacyAutoRefresh ? .onOpen : .manual
+        }
+
+        let minutes =
+            (try? container.decode(Int.self, forKey: .refreshIntervalMinutes))
+            ?? Self.defaultRefreshIntervalMinutes
+        refreshIntervalMinutes = minutes.clamped(to: Self.refreshIntervalRange)
     }
 
     func encode(to encoder: Encoder) throws {
@@ -131,10 +176,17 @@ struct DisplaySettings: Hashable, Codable, Sendable {
         try container.encode(menuBarVisualization, forKey: .menuBarVisualization)
         try container.encode(showsOverallPercentage, forKey: .showsOverallPercentage)
         try container.encodeIfPresent(timeZoneIdentifier, forKey: .timeZoneIdentifier)
-        try container.encode(autoRefreshOnOpen, forKey: .autoRefreshOnOpen)
+        try container.encode(refreshMode, forKey: .refreshMode)
+        try container.encode(refreshIntervalMinutes, forKey: .refreshIntervalMinutes)
     }
 
     var timeZone: TimeZone {
         timeZoneIdentifier.flatMap(TimeZone.init(identifier:)) ?? .current
+    }
+}
+
+private extension Comparable {
+    func clamped(to range: ClosedRange<Self>) -> Self {
+        min(max(self, range.lowerBound), range.upperBound)
     }
 }

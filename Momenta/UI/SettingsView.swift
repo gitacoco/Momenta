@@ -257,12 +257,31 @@ struct SettingsView: View {
             }
 
             SwiftUI.Section("Data behavior") {
-                Picker("Refresh data", selection: $appState.displaySettings.autoRefreshOnOpen) {
-                    Text("When the popover opens").tag(true)
-                    Text("Manually only").tag(false)
+                Picker("Refresh data", selection: $appState.displaySettings.refreshMode) {
+                    ForEach(RefreshMode.allCases) { mode in
+                        Text(mode.label).tag(mode)
+                    }
                 }
 
-                Text("Toggl's free plan allows 30 API requests per hour. Manual mode spends them only when you ask.")
+                if appState.displaySettings.refreshMode == .interval {
+                    LabeledContent("Refresh every") {
+                        HStack(spacing: 6) {
+                            TextField(
+                                "",
+                                value: refreshIntervalBinding,
+                                format: .number
+                            )
+                            .labelsHidden()
+                            .multilineTextAlignment(.trailing)
+                            .monospacedDigit()
+                            .frame(width: 52)
+                            Text("minutes")
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+
+                Text("Toggl's free plan allows 30 API requests per hour. Manual mode spends them only when you ask; interval mode spends them on the schedule above (5–240 minutes).")
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
 
@@ -281,6 +300,19 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
+    }
+
+    /// Free text can hold any number, so clamp writes into the supported
+    /// range instead of trusting whatever the user typed.
+    private var refreshIntervalBinding: Binding<Int> {
+        Binding(
+            get: { appState.displaySettings.refreshIntervalMinutes },
+            set: { newValue in
+                let range = DisplaySettings.refreshIntervalRange
+                appState.displaySettings.refreshIntervalMinutes =
+                    min(max(newValue, range.lowerBound), range.upperBound)
+            }
+        )
     }
 
     /// Example of how the chosen time zone resolves the current month, so the

@@ -27,7 +27,8 @@ struct DisplaySettingsTests {
             #expect(settings.menuBarVisualization == .ring)
             #expect(settings.showsOverallPercentage == false)
             #expect(settings.timeZoneIdentifier == "Pacific/Honolulu")
-            #expect(settings.autoRefreshOnOpen == false)
+            // The legacy boolean maps onto the mode that replaced it.
+            #expect(settings.refreshMode == .manual)
         }
     }
 
@@ -65,7 +66,7 @@ struct DisplaySettingsTests {
                     settings.menuBarVisualization = visualization
                     settings.showsOverallPercentage = true
                     settings.timeZoneIdentifier = "UTC"
-                    settings.autoRefreshOnOpen = false
+                    settings.refreshMode = .manual
 
                     let data = try JSONEncoder().encode(settings)
                     let decoded = try JSONDecoder().decode(DisplaySettings.self, from: data)
@@ -115,7 +116,56 @@ struct DisplaySettingsTests {
         #expect(settings.menuBarVisualization == .ring)
         #expect(settings.showsOverallPercentage == false)
         #expect(settings.timeZoneIdentifier == "Pacific/Honolulu")
-        #expect(settings.autoRefreshOnOpen == false)
+        #expect(settings.refreshMode == .manual)
+    }
+
+    @Test func refreshModeAndIntervalRoundTrip() throws {
+        var settings = DisplaySettings()
+        settings.refreshMode = .interval
+        settings.refreshIntervalMinutes = 45
+
+        let data = try JSONEncoder().encode(settings)
+        let decoded = try JSONDecoder().decode(DisplaySettings.self, from: data)
+
+        #expect(decoded.refreshMode == .interval)
+        #expect(decoded.refreshIntervalMinutes == 45)
+    }
+
+    @Test func outOfRangeIntervalIsClampedOnDecode() throws {
+        for (stored, expected) in [(1, 5), (10_000, 240)] {
+            let json = """
+            {
+              "aggregationPeriod": "month",
+              "refreshMode": "interval",
+              "refreshIntervalMinutes": \(stored)
+            }
+            """
+
+            let settings = try JSONDecoder().decode(
+                DisplaySettings.self,
+                from: Data(json.utf8)
+            )
+
+            #expect(settings.refreshMode == .interval)
+            #expect(settings.refreshIntervalMinutes == expected)
+        }
+    }
+
+    @Test func unknownRefreshModeFallsBackToLegacyBoolean() throws {
+        let json = """
+        {
+          "aggregationPeriod": "month",
+          "refreshMode": "hourly",
+          "autoRefreshOnOpen": false
+        }
+        """
+
+        let settings = try JSONDecoder().decode(
+            DisplaySettings.self,
+            from: Data(json.utf8)
+        )
+
+        #expect(settings.refreshMode == .manual)
     }
 }
 

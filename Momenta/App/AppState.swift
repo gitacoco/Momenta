@@ -41,6 +41,10 @@ final class AppState {
                 // A day/week anchor is meaningless under a different granularity.
                 resetReferenceToNow()
             }
+            if oldValue.refreshMode != displaySettings.refreshMode
+                || oldValue.refreshIntervalMinutes != displaySettings.refreshIntervalMinutes {
+                rescheduleIntervalRefresh()
+            }
         }
     }
     var selectedMonth: YearMonth
@@ -127,6 +131,7 @@ final class AppState {
     /// `account.generation` directly.
     @ObservationIgnored private var fetchEpoch = 0
     @ObservationIgnored private var boundaryTick: Task<Void, Never>?
+    @ObservationIgnored private var intervalRefreshTick: Task<Void, Never>?
     @ObservationIgnored private var wakeObserver: NSObjectProtocol?
     @ObservationIgnored private var clockChangeObserver: NSObjectProtocol?
     @ObservationIgnored private var timeZoneChangeObserver: NSObjectProtocol?
@@ -157,6 +162,7 @@ final class AppState {
             .union([YearMonth(containing: Date(), timeZone: settings.timeZone)])
             .sorted()
         startClock()
+        rescheduleIntervalRefresh()
         if autoRefresh {
             Task {
                 // Launch refresh respects manual-only mode too.
@@ -167,6 +173,7 @@ final class AppState {
 
     isolated deinit {
         boundaryTick?.cancel()
+        intervalRefreshTick?.cancel()
         if let wakeObserver {
             NSWorkspace.shared.notificationCenter.removeObserver(wakeObserver)
         }
@@ -226,6 +233,27 @@ final class AppState {
         }
     }
 
+    /// Drives the `.interval` refresh mode: a loop that fetches every
+    /// user-chosen span of minutes and no-ops in any other mode. Restarted
+    /// whenever the mode or interval changes so a new cadence takes effect at
+    /// once. Each tick uses the throttled `refresh()`, so a popover-open fetch
+    /// moments earlier is reused rather than double-spent.
+    private func rescheduleIntervalRefresh() {
+        intervalRefreshTick?.cancel()
+        intervalRefreshTick = nil
+        guard displaySettings.refreshMode == .interval else { return }
+        let minutes = displaySettings.refreshIntervalMinutes
+        let seconds = TimeInterval(max(DisplaySettings.refreshIntervalRange.lowerBound, minutes)) * 60
+        intervalRefreshTick = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(seconds))
+                guard !Task.isCancelled else { return }
+                guard let self else { return }
+                await self.refresh()
+            }
+        }
+    }
+
     /// Advances `displayNow` and performs the rollover work: re-schedule the
     /// next tick, keep `selectedMonth` on the current month while following
     /// "now", and prepare week neighbours. Passive by nature, so the fetch
@@ -238,7 +266,7 @@ final class AppState {
             let month = currentMonth
             if month != selectedMonth {
                 selectedMonth = month
-                if displaySettings.autoRefreshOnOpen, snapshots[month] == nil {
+                if displaySettings.allowsPassiveFetch, snapshots[month] == nil {
                     Task { await self.loadMonth(month) }
                 }
             }
@@ -289,7 +317,7 @@ final class AppState {
     /// throttled otherwise so repeatedly opening and closing the popover
     /// cannot burn through the API quota. Manual refresh bypasses both.
     func refreshIfNeeded() async {
-        guard displaySettings.autoRefreshOnOpen else { return }
+        guard displaySettings.allowsPassiveFetch else { return }
         if let last = lastAutoRefreshAt,
            Date().timeIntervalSince(last) < Self.minAutoRefreshInterval {
             return
@@ -740,7 +768,7 @@ final class AppState {
     /// Future months are never fetched — they synthesize locally.
     func prepareWeekNeighbors(userInitiated: Bool) {
         guard displaySettings.aggregationPeriod == .week else { return }
-        guard userInitiated || displaySettings.autoRefreshOnOpen else { return }
+        guard userInitiated || displaySettings.allowsPassiveFetch else { return }
         for month in weekMonths(for: activeReference)
         where snapshots[month] == nil && month <= currentMonth && !loadingMonths.contains(month) {
             Task { await loadMonth(month) }

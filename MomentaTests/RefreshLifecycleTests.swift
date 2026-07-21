@@ -605,7 +605,7 @@ struct WeekUnificationTests {
         let appState = makeAppState(provider: MockDataProvider())
         appState.displayNow = midMonth(appState)
         await appState.refresh()
-        appState.displaySettings.autoRefreshOnOpen = false
+        appState.displaySettings.refreshMode = .manual
 
         let nextMonth = appState.currentMonth.next
         let jumped = nextMonth.start(in: appState.timeZone).addingTimeInterval(12 * 3600)
