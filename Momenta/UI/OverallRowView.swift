@@ -44,7 +44,7 @@ struct OverallRowView: View {
             OverallRingGlyph(fraction: isAvailable ? fraction : nil)
                 .frame(width: 20, height: 20)
 
-            HStack(spacing: 8) {
+            HStack(spacing: 4) {
                 Text("Overall")
                     .textCase(.uppercase)
                     .fixedSize(horizontal: true, vertical: false)
@@ -59,8 +59,8 @@ struct OverallRowView: View {
 
             Spacer(minLength: 8)
 
-            Text("\(Text(actualText).foregroundStyle(.primary).fontWeight(.semibold))\(Text(" / \(targetText) · ").foregroundStyle(.secondary))\(Text(percentText).foregroundStyle(.primary).fontWeight(.semibold))")
-                .font(.caption.monospacedDigit())
+            Text("\(Text(actualText).foregroundStyle(.primary))\(Text(" / \(targetText) · ").foregroundStyle(.secondary))\(Text(percentText).foregroundStyle(.primary))")
+                .font(.callout.monospacedDigit())
                 .lineLimit(1)
                 .accessibilityLabel("\(percentText), \(actualText) of \(targetText)")
         }
@@ -100,16 +100,30 @@ private struct OverallPeriodCycleButton: View {
         Button {
             selection = selection.nextInCycle
         } label: {
-            Text(selection.overallPickerLabel)
-                .textCase(.uppercase)
-                .fixedSize(horizontal: true, vertical: false)
-                // Pop from secondary to primary on hover so the plain text
-                // still reads as clickable.
-                .foregroundStyle(isHovering ? Color.primary : Color.secondary)
-                .contentShape(Rectangle())
+            HStack(spacing: 4) {
+                Text(selection.overallPickerLabel)
+                    .textCase(.uppercase)
+                    .fixedSize(horizontal: true, vertical: false)
+                // The swap glyph makes "click to cycle" legible; the plain
+                // label alone read as static text.
+                Image(systemName: "arrow.left.arrow.right")
+                    .imageScale(.small)
+                    .opacity(0.7)
+            }
+            .foregroundStyle(isHovering ? Color.primary : Color.secondary)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            // A soft base fill on hover marks the whole hit target, matching
+            // the modern inline-control hover treatment.
+            .background(
+                RoundedRectangle(cornerRadius: 5, style: .continuous)
+                    .fill(Color.primary.opacity(isHovering ? 0.08 : 0))
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
         }
         .buttonStyle(.plain)
         .onHover { isHovering = $0 }
+        .animation(.easeOut(duration: 0.12), value: isHovering)
         .accessibilityLabel("Overall period")
         .accessibilityValue(selection.overallPickerLabel)
         .accessibilityHint("Cycles the summary period")
