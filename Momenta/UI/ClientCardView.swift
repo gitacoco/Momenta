@@ -18,6 +18,13 @@ struct ClientCardView: View {
 
     var data: ClientCardData
     var unit: DisplayUnit
+    /// Whether the shown period contains "now". A back-stepped past period
+    /// keeps its endpoint value label but drops the marker dot — the dot is
+    /// a live-edge cue, and a finished week/month has no live edge.
+    var isCurrentPeriod: Bool
+    /// Day-stable seed (whole days since 2001) so the day card's encouragement
+    /// copy is picked once per day and holds steady across refreshes.
+    var dailySeed: Int
     var onEditGoal: () -> Void
 
     // MARK: Shared derived values
@@ -64,7 +71,6 @@ struct ClientCardView: View {
     }
 
     private var currencyCode: String { client.currency }
-
     // MARK: Body
 
     var body: some View {
@@ -231,7 +237,9 @@ struct ClientCardView: View {
                         x: .value("Today", todayPoint.day),
                         y: .value("Actual", value(actual: todayPoint))
                     )
-                    .symbolSize(36)
+                    // The annotation anchors here, so a zero-size symbol keeps the
+                    // value label while hiding the dot on past periods.
+                    .symbolSize(isCurrentPeriod ? 36 : 0)
                     .foregroundStyle(clientColor)
                     .annotation(
                         position: markerAnnotationPosition(for: todayPoint, hasGoal: hasGoal),
@@ -355,11 +363,13 @@ struct ClientCardView: View {
                 }
             }
             Spacer()
-            deltaBadge(weekDeltaText(slice))
+            deltaBadge(sliceDeltaText(slice))
         }
     }
 
-    private func weekDeltaText(_ slice: ClientPeriodSlice) -> String? {
+    /// Behind/ahead delta text for any period slice (week and day). Day reuses
+    /// the target as its planned-to-date, so its delta is actual − day pace.
+    private func sliceDeltaText(_ slice: ClientPeriodSlice) -> String? {
         guard let deltaHours = slice.deltaHours, let deltaRevenue = slice.deltaRevenue else {
             return nil
         }
@@ -416,39 +426,84 @@ struct ClientCardView: View {
     }
 
     private func dayMetrics(_ slice: ClientPeriodSlice, targetHours: Decimal) -> some View {
-        let overHours = slice.actualHours - targetHours
-        let done = overHours >= 0
-        let fraction = targetHours > 0 ? (slice.actualHours / targetHours).doubleValue : 0
+        let done = slice.actualHours >= targetHours
+        let fraction = (slice.actualHours / targetHours).doubleValue
         return HStack(alignment: .firstTextBaseline) {
-            if done {
-                HStack(alignment: .firstTextBaseline, spacing: 5) {
-                    Text("Done for today")
-                        .font(.callout.weight(.semibold))
-                        .foregroundStyle(deltaColor)
-                    Text("+\(magnitude(hours: overHours, rate: slice.hourlyRate)) over")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                }
-            } else {
-                HStack(alignment: .firstTextBaseline, spacing: 4) {
-                    Text(magnitude(hours: -overHours, rate: slice.hourlyRate))
-                        .font(.title3.weight(.semibold).monospacedDigit())
-                    Text("left today")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                }
-            }
+            // Left is a short status/encouragement line only. The concrete
+            // over/behind number lives in the trailing badge, so it is not
+            // repeated here.
+            Text(dayMessage(fraction: fraction, done: done))
+                .font(.callout.weight(.semibold))
+                // Neutral in every state — the trailing badge is the single
+                // ahead/behind colour signal, matching week and month.
+                .foregroundStyle(.primary)
             Spacer()
-            HStack(alignment: .firstTextBaseline, spacing: 5) {
-                Image(systemName: deltaIcon)
-                    .foregroundStyle(deltaColor)
-                Text(Format.percent(fraction))
-                    .foregroundStyle(.primary)
-            }
-            .font(.callout.weight(.semibold).monospacedDigit())
-            .accessibilityElement(children: .combine)
+            deltaBadge(sliceDeltaText(slice))
         }
     }
+
+    /// One of seven per-bucket encouragements, chosen per client per day: stable
+    /// through the day, rotating day to day and differing between clients.
+    private func dayMessage(fraction: Double, done: Bool) -> String {
+        let options: [String]
+        let bucket: Int
+        if done {
+            options = Self.doneMessages; bucket = 5
+        } else if fraction <= 0 {
+            options = Self.notStartedMessages; bucket = 0
+        } else if fraction < 0.25 {
+            options = Self.earlyMessages; bucket = 1
+        } else if fraction < 0.50 {
+            options = Self.quarterMessages; bucket = 2
+        } else if fraction < 0.75 {
+            options = Self.halfMessages; bucket = 3
+        } else {
+            options = Self.lateMessages; bucket = 4
+        }
+        let seed = (dailySeed &* 73_856_093) ^ (client.id &* 19_349_663) ^ (bucket &* 83_492_791)
+        return Self.scrambledChoice(options, seed: seed)
+    }
+
+    /// Deterministic pick with a SplitMix64 finalizer so consecutive days and
+    /// neighbouring client ids don't fall into an obvious ascending pattern.
+    private static func scrambledChoice(_ options: [String], seed: Int) -> String {
+        guard !options.isEmpty else { return "" }
+        var h = UInt64(bitPattern: Int64(seed))
+        h = (h ^ (h >> 30)) &* 0xBF58476D1CE4E5B9
+        h = (h ^ (h >> 27)) &* 0x94D049BB133111EB
+        h ^= h >> 31
+        return options[Int(h % UInt64(options.count))]
+    }
+
+    // MARK: Day encouragement copy
+
+    // Seven variants per progress bucket, blended across warm, upbeat, and
+    // dry-witty voices. Edit freely — order doesn't matter, the daily pick is
+    // hashed. Keep each short enough to sit opposite the trailing delta badge.
+    private static let notStartedMessages = [
+        "Ready to roll", "Here we go", "Blank canvas", "The day's wide open",
+        "Clean slate", "Nothing logged… yet", "Time to dive in",
+    ]
+    private static let earlyMessages = [
+        "Off and running", "Engine's on", "Wheels turning", "Technically started",
+        "Warming up", "On the board", "Getting rolling",
+    ]
+    private static let quarterMessages = [
+        "Finding your groove", "Cooking now", "Making a dent", "Picking up steam",
+        "In the swing of it", "Hitting your stride", "Rolling along",
+    ]
+    private static let halfMessages = [
+        "Over the hump", "Downhill from here", "More done than not", "Past the midpoint",
+        "Cruising now", "The back half", "Well past half",
+    ]
+    private static let lateMessages = [
+        "Home stretch", "So close now", "Basically there", "The final push",
+        "Nearly nailed it", "Almost in the bag", "One more push",
+    ]
+    private static let doneMessages = [
+        "Done for today!", "Crushed it!", "Free to log off!", "Nailed it!",
+        "That's a wrap!", "Goal met — nice!", "Call it a day!",
+    ]
 
     // MARK: Formatting helpers
 
@@ -460,13 +515,6 @@ struct ClientCardView: View {
         }
     }
 
-    /// An hours magnitude priced at the client rate when showing revenue.
-    private func magnitude(hours: Decimal, rate: Decimal) -> String {
-        switch unit {
-        case .revenue: return Format.currency(hours * rate, code: currencyCode)
-        case .hours: return Format.hours(hours)
-        }
-    }
 }
 
 private struct GoalChipButtonStyle: ButtonStyle {

@@ -140,6 +140,11 @@ struct DashboardView: View {
                             ClientCardView(
                                 data: card,
                                 unit: appState.displayUnit,
+                                // nil reference = following now (BON-21 semantics).
+                                isCurrentPeriod: appState.selectedReference == nil,
+                                // Whole days since 2001: stable within a day so
+                                // the day card's rotating copy holds all day.
+                                dailySeed: Int(appState.activeReference.timeIntervalSinceReferenceDate / 86_400),
                                 onEditGoal: {
                                     appState.pendingSettingsDestination = .clients(clientID: client.id)
                                     openSettingsWindow()
@@ -295,12 +300,11 @@ struct DashboardView: View {
     // MARK: Footer
 
     private var footer: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: 8) {
             if appState.isLoading {
                 ProgressView()
                     .controlSize(.small)
                 Text("Refreshing…")
-                    .font(.caption)
                     .foregroundStyle(.secondary)
             } else {
                 statusLine
@@ -312,6 +316,7 @@ struct DashboardView: View {
                 Task { await appState.refresh(force: true) }
             } label: {
                 Image(systemName: "arrow.clockwise")
+                    .imageScale(.large)
             }
             .buttonStyle(.borderless)
             .disabled(appState.isLoading)
@@ -320,9 +325,13 @@ struct DashboardView: View {
                 openSettingsWindow()
             } label: {
                 Image(systemName: "gearshape")
+                    .imageScale(.large)
             }
             .buttonStyle(.borderless)
         }
+        // One environment font sizes the whole strip: status text, error
+        // icons, and the Reconnect button all follow it.
+        .font(.callout)
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
     }
@@ -334,9 +343,7 @@ struct DashboardView: View {
         if let apiError = appState.lastAPIError {
             Image(systemName: apiError.statusIconName)
                 .foregroundStyle(.orange)
-                .font(.caption)
             Text(staleSuffix(apiError.errorDescription ?? "Refresh failed"))
-                .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             if apiError == .unauthorized {
@@ -344,26 +351,20 @@ struct DashboardView: View {
                     appState.pendingSettingsDestination = .account
                     openSettingsWindow()
                 }
-                .font(.caption)
             }
         } else if let error = appState.lastError {
             Image(systemName: "exclamationmark.triangle")
                 .foregroundStyle(.orange)
-                .font(.caption)
             Text(staleSuffix(error))
-                .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         } else if appState.isShowingStaleData {
             Image(systemName: "clock.arrow.circlepath")
                 .foregroundStyle(.orange)
-                .font(.caption)
             Text("Cached data — connect Toggl to refresh")
-                .font(.caption)
                 .foregroundStyle(.secondary)
         } else if let fetchedAt = appState.selectedSnapshot?.fetchedAt {
             Text("Updated \(fetchedAt.formatted(date: .omitted, time: .shortened))")
-                .font(.caption)
                 .foregroundStyle(.secondary)
         }
     }
