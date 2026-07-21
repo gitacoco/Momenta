@@ -59,8 +59,9 @@ struct OverallRowView: View {
 
             Spacer(minLength: 8)
 
-            Text("\(Text(actualText).foregroundStyle(.primary))\(Text(" / \(targetText) · ").foregroundStyle(.secondary))\(Text(percentText).foregroundStyle(.primary))")
+            Text("\(actualText) / \(targetText) · \(percentText)")
                 .font(.callout.monospacedDigit())
+                .foregroundStyle(.secondary)
                 .lineLimit(1)
                 .accessibilityLabel("\(percentText), \(actualText) of \(targetText)")
         }
