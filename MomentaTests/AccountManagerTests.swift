@@ -429,6 +429,46 @@ struct AccountManagerTests {
         #expect(manager.apiClient() != nil)
     }
 
+    @Test func disabledICloudBuildRestoresSyncedCredentialLocally() throws {
+        let store = InMemoryTokenStore(token: "stale-local", syncedToken: "remote")
+        let defaults = freshDefaults()
+        defaults.set(true, forKey: "momenta.iCloud.credentialEnabled")
+        let snapshot = AccountSnapshot(
+            togglUserID: 1,
+            fullname: "Z",
+            email: "z@example.com",
+            workspaces: [],
+            connectedAt: Date()
+        )
+        defaults.set(try JSONEncoder().encode(snapshot), forKey: "toggl.accountSnapshot")
+
+        let manager = AccountManager(
+            tokenStore: store,
+            transport: SequenceTransport([]),
+            defaults: defaults,
+            iCloudSyncAvailable: false
+        )
+
+        #expect(manager.usesICloudCredential == false)
+        #expect(defaults.bool(forKey: "momenta.iCloud.credentialEnabled") == false)
+        #expect(store.localToken == "remote")
+        #expect(store.syncedToken == "remote")
+        #expect(manager.state == .connected(snapshot))
+        #expect(manager.apiClient() != nil)
+    }
+
+    @Test func disabledICloudBuildCannotEnableSync() async {
+        let manager = AccountManager(
+            tokenStore: InMemoryTokenStore(token: "local"),
+            transport: SequenceTransport([]),
+            defaults: freshDefaults(),
+            iCloudSyncAvailable: false
+        )
+
+        #expect(await manager.enableICloudCredentialSync() == false)
+        #expect(manager.credentialAttention == .operation("iCloud Sync is unavailable in this build."))
+    }
+
     @Test func localDisconnectDoesNotDeleteDiscoveredSyncedCredential() {
         let store = InMemoryTokenStore(token: "local", syncedToken: "remote")
         let defaults = freshDefaults()

@@ -13,10 +13,17 @@ enum SettingsDestination: Equatable, Sendable {
 final class AppState {
     /// Single instance shared by the status item (AppKit) and the SwiftUI
     /// Settings scene.
-    static let shared = AppState(
-        provider: MockDataProvider(),
-        cloudDatabase: CloudKitSyncDatabase()
-    )
+    static let shared: AppState = {
+        let account = AccountManager(iCloudSyncAvailable: AppFeatureFlags.iCloudSync)
+        let cloudDatabase: (any CloudSyncDatabase)? = AppFeatureFlags.iCloudSync
+            ? CloudKitSyncDatabase()
+            : nil
+        return AppState(
+            provider: MockDataProvider(),
+            account: account,
+            cloudDatabase: cloudDatabase
+        )
+    }()
 
     /// Demo data source used before any Toggl account is connected.
     private let fallbackProvider: any DataProvider

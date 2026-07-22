@@ -29,6 +29,8 @@ struct AccountSettingsView: View {
             }
             if let iCloudSync {
                 iCloudSection(iCloudSync)
+            } else if !AppFeatureFlags.iCloudSync {
+                unavailableICloudSection
             }
         }
         .formStyle(.grouped)
@@ -153,6 +155,27 @@ struct AccountSettingsView: View {
     }
 
     // MARK: iCloud sync
+
+    private var unavailableICloudSection: some View {
+        Section {
+            LabeledContent("Status") {
+                HStack(spacing: 8) {
+                    Circle()
+                        .fill(Color.secondary)
+                        .frame(width: 8, height: 8)
+                        .accessibilityHidden(true)
+                    Text("Unavailable in this build")
+                        .foregroundStyle(.secondary)
+                }
+            }
+        } header: {
+            Text("iCloud Sync")
+        } footer: {
+            Text("iCloud Sync is temporarily disabled. Toggl credentials and client settings remain local to this Mac.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
 
     @ViewBuilder
     private func iCloudSection(_ sync: ICloudSyncManager) -> some View {

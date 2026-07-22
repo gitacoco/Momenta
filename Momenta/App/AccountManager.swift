@@ -99,6 +99,7 @@ final class AccountManager {
     private let tokenStore: any TokenStore
     private let transport: any HTTPTransport
     private let defaults: UserDefaults
+    private let iCloudSyncAvailable: Bool
 
     private(set) var state: ConnectionState = .disconnected
     private(set) var lastSyncAt: Date?
@@ -118,12 +119,25 @@ final class AccountManager {
     init(
         tokenStore: any TokenStore = KeychainTokenStore(),
         transport: any HTTPTransport = URLSession.shared,
-        defaults: UserDefaults = .standard
+        defaults: UserDefaults = .standard,
+        iCloudSyncAvailable: Bool = true
     ) {
         self.tokenStore = tokenStore
         self.transport = transport
         self.defaults = defaults
-        usesICloudCredential = defaults.bool(forKey: Self.iCloudCredentialKey)
+        self.iCloudSyncAvailable = iCloudSyncAvailable
+
+        let wasUsingICloudCredential = defaults.bool(forKey: Self.iCloudCredentialKey)
+        if wasUsingICloudCredential, !iCloudSyncAvailable {
+            // A build that cannot activate CloudKit must not strand an account
+            // whose only token was migrated to the synchronizable Keychain
+            // scope. Preserve a verified byte-for-byte local copy, keep the
+            // synced item for a future enabled build, and return this Mac to
+            // the ordinary local credential path.
+            Self.copySyncedCredentialToLocalIfNeeded(from: tokenStore)
+            defaults.set(false, forKey: Self.iCloudCredentialKey)
+        }
+        usesICloudCredential = wasUsingICloudCredential && iCloudSyncAvailable
 
         // Relaunch: connected as long as both the token and the snapshot
         // survived. A synchronizable token is held back from API clients until
@@ -141,6 +155,24 @@ final class AccountManager {
             }
         }
         lastSyncAt = defaults.object(forKey: Self.lastSyncKey) as? Date
+    }
+
+    private static func copySyncedCredentialToLocalIfNeeded(from store: any TokenStore) {
+        guard let store = store as? any SynchronizableTokenStore else { return }
+        do {
+            guard let syncedToken = try store.load(scope: .synchronizable) else { return }
+            if try store.load(scope: .local) != syncedToken {
+                try store.save(syncedToken, scope: .local)
+            }
+            guard try store.load(scope: .local) == syncedToken else {
+                throw KeychainError(status: errSecDecode)
+            }
+        } catch {
+            // The normal disconnected state is safer than adopting an
+            // unrelated local credential. The user can reconnect locally;
+            // the synchronizable item is intentionally left untouched.
+            try? store.delete(scope: .local)
+        }
     }
 
     private static func loadRestoredToken(
@@ -229,6 +261,10 @@ final class AccountManager {
     /// explicit confirmation instead of silently adopting it.
     @discardableResult
     func enableICloudCredentialSync() async -> Bool {
+        guard iCloudSyncAvailable else {
+            credentialAttention = .operation("iCloud Sync is unavailable in this build.")
+            return false
+        }
         guard let store = tokenStore as? any SynchronizableTokenStore else {
             credentialAttention = .operation("This Keychain store does not support iCloud synchronization.")
             return false
