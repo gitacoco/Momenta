@@ -1,93 +1,13 @@
 import Foundation
 
 /// Pure presentation math shared by the period chart and its focused tests.
-/// Keeping crossings out of the SwiftUI builder makes the rendered areas
-/// deterministic and prevents Charts from joining differently colored spans.
+/// Keeping tick selection, resampling, and domain rounding out of the SwiftUI
+/// builder keeps the animated week/month transition deterministic.
 enum PeriodChartLayout {
     /// `MMM d` at the chart's caption size fits comfortably in this slot on
     /// macOS, including the gap to its neighbor. The fixed slot also makes the
     /// chosen dates stable for a given period and card width.
     private static let minimumDateLabelSlot = 44.0
-
-    struct Sample: Equatable, Sendable {
-        var day: Date
-        var actual: Double
-        var planned: Double
-    }
-
-    enum VarianceState: Equatable, Sendable {
-        case ahead
-        case behind
-    }
-
-    struct VarianceSegment: Identifiable, Equatable, Sendable {
-        var id: Int
-        var state: VarianceState
-        var points: [Sample]
-    }
-
-    /// Splits piecewise-linear actual/planned data at every strict crossing.
-    /// The interpolated crossing belongs to both neighboring segments, so the
-    /// fills meet exactly without a gap or a wrong-colored triangle.
-    static func varianceSegments(samples: [Sample]) -> [VarianceSegment] {
-        guard samples.count > 1 else { return [] }
-
-        var segments: [VarianceSegment] = []
-
-        func appendSpan(
-            from start: Sample,
-            to end: Sample,
-            state: VarianceState
-        ) {
-            if segments.last?.state == state,
-               segments.last?.points.last?.day == start.day {
-                segments[segments.count - 1].points.append(end)
-            } else {
-                segments.append(
-                    VarianceSegment(
-                        id: segments.count,
-                        state: state,
-                        points: [start, end]
-                    )
-                )
-            }
-        }
-
-        for (start, end) in zip(samples, samples.dropFirst()) {
-            let startDelta = start.actual - start.planned
-            let endDelta = end.actual - end.planned
-
-            if startDelta * endDelta < 0 {
-                let fraction = startDelta / (startDelta - endDelta)
-                let crossing = Sample(
-                    day: start.day.addingTimeInterval(
-                        end.day.timeIntervalSince(start.day) * fraction
-                    ),
-                    actual: start.actual + (end.actual - start.actual) * fraction,
-                    planned: start.planned + (end.planned - start.planned) * fraction
-                )
-                appendSpan(
-                    from: start,
-                    to: crossing,
-                    state: startDelta >= 0 ? .ahead : .behind
-                )
-                appendSpan(
-                    from: crossing,
-                    to: end,
-                    state: endDelta >= 0 ? .ahead : .behind
-                )
-            } else {
-                // Equality at one endpoint has zero area. Classify the span by
-                // its midpoint so the visible interval uses its local state.
-                let state: VarianceState = (startDelta + endDelta) / 2 >= 0
-                    ? .ahead
-                    : .behind
-                appendSpan(from: start, to: end, state: state)
-            }
-        }
-
-        return segments
-    }
 
     /// Uses every date while it fits, then chooses an evenly distributed,
     /// deterministic subset that always includes both period boundaries.
@@ -104,5 +24,40 @@ enum PeriodChartLayout {
             let position = Double(slot) * Double(days.count - 1) / Double(capacity - 1)
             return days[Int(position.rounded())]
         }
+    }
+
+    /// Gives cumulative charts a stable zero baseline and a small rounded
+    /// headroom. Passing this domain explicitly makes Y-axis rescaling part of
+    /// the same animation as the marks instead of relying on an opaque auto
+    /// scale update.
+    static func yDomainUpperBound(values: [Double]) -> Double {
+        let maximum = values.filter(\.isFinite).max() ?? 0
+        guard maximum > 0 else { return 1 }
+
+        let target = maximum * 1.12
+        let magnitude = pow(10, floor(log10(target)))
+        let normalized = target / magnitude
+        let steps = [1.0, 1.25, 1.5, 2, 2.5, 3, 4, 5, 6, 8, 10]
+        let rounded = steps.first(where: { $0 >= normalized }) ?? 10
+        return rounded * magnitude
+    }
+
+    /// Gridline values for the hand-drawn Y axis: multiples of a nice step
+    /// (1 / 2 / 2.5 / 5 × 10ⁿ) from zero through the domain's upper bound.
+    /// Week and month bounds draw from the same step family, so a period
+    /// switch usually keeps some tick values identical — those slide with the
+    /// rescaling axis while the rest fade in or out.
+    static func yAxisTicks(upperBound: Double, targetCount: Int = 4) -> [Double] {
+        guard upperBound > 0, upperBound.isFinite else { return [0] }
+
+        let rawStep = upperBound / Double(targetCount)
+        let magnitude = pow(10, floor(log10(rawStep)))
+        let normalized = rawStep / magnitude
+        let candidates = [1.0, 2, 2.5, 5, 10]
+        let step = (candidates.first(where: { $0 >= normalized }) ?? 10) * magnitude
+        // The epsilon keeps a bound that is an exact multiple of the step
+        // from losing its top tick to floating-point noise.
+        let count = Int(((upperBound / step) + 1e-9).rounded(.down))
+        return (0...count).map { Double($0) * step }
     }
 }
