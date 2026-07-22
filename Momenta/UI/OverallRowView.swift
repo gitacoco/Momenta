@@ -78,16 +78,17 @@ private extension AggregationPeriod {
         }
     }
 
-    /// The next period when the label is clicked, wrapping around. Order follows
-    /// `allCases` (day → week → month → day).
+    /// The next period when the label is clicked, wrapping around:
+    /// month → week → day → month. Steps backwards through `allCases` so the
+    /// settings picker keeps its day/week/month display order.
     var nextInCycle: AggregationPeriod {
         let all = AggregationPeriod.allCases
         let index = all.firstIndex(of: self) ?? all.startIndex
-        return all[(index + 1) % all.count]
+        return all[(index + all.count - 1) % all.count]
     }
 }
 
-/// A plain-text period label that cycles Today → This Week → This Month on each
+/// A plain-text period label that cycles This Month → This Week → Today on each
 /// click. Deliberately not a native `NSPopUpButton`/`NSMenu` nor a SwiftUI
 /// `Menu`/`Picker(.menu)`: those present a real `NSMenu` in a *separate window*
 /// whose tracking loop is closed by the trailing physical Force Touch pressure
