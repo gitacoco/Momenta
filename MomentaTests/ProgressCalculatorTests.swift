@@ -745,6 +745,52 @@ struct ProgressCalculatorTests {
         #expect(aggregate.fraction == 1)
     }
 
+    @Test func nonBillableScheduledClientRingReadsHoursNotRevenue() {
+        var config = client(pacing: .weekdays, goal: MonthlyGoal(hourlyRate: 0, input: .hours(20)))
+        config.isBillable = false
+        let now = date(day: 22, hour: 16) // Wednesday work day, nothing logged
+        let aggregate = ProgressCalculator.aggregate(
+            clients: [config], entries: [], month: july,
+            period: .day, timeZone: utc, now: now
+        )
+        let share = aggregate.shares[0]
+        // The revenue ring is a meaningless full ring (target 0, available)…
+        #expect(share.fraction == 1)
+        // …but the hours ring correctly shows nothing done against a real pace,
+        // which is what the menu bar now draws in hours mode.
+        #expect(share.hoursTargetIsAvailable)
+        #expect(share.targetHours > 0)
+        #expect(share.hoursFraction == 0)
+    }
+
+    @Test func dayOverallHoursCountsOnlyClientsScheduledToday() {
+        var working = client(pacing: .calendarDays, goal: MonthlyGoal(hourlyRate: 100, input: .hours(9)))
+        working.id = 1
+        var offToday = client(pacing: .custom, goal: MonthlyGoal(hourlyRate: 100, input: .hours(50)))
+        offToday.id = 2
+        offToday.customWorkDays = [1, 2, 3, 4, 6, 7] // Thursday off
+        let now = date(day: 23, hour: 16) // Thursday
+        let entries = [
+            TimeEntry(id: 1, clientID: 1, start: date(day: 23, hour: 9), stop: date(day: 23, hour: 10)),  // 1h scheduled
+            TimeEntry(id: 2, clientID: 2, start: date(day: 23, hour: 10), stop: date(day: 23, hour: 12)), // 2h on a day off
+        ]
+        let aggregate = ProgressCalculator.aggregate(
+            clients: [working, offToday], entries: entries, month: july,
+            period: .day, timeZone: utc, now: now
+        )
+        // Only the calendar-days client works today: its frozen pace is
+        // 9h over the 9 remaining days = 1h. The off-today client must not
+        // push its 50h catch-up onto a day it does not work — and its 2h of
+        // rest-day work must not complete the working client's target either:
+        // both sides of the Overall fraction cover the scheduled cohort only.
+        #expect(aggregate.targetHours == 1)
+        #expect(aggregate.actualHours == 1)
+        let scheduled = aggregate.shares.first { $0.id == 1 }
+        let off = aggregate.shares.first { $0.id == 2 }
+        #expect(scheduled?.hoursTargetIsAvailable == true)
+        #expect(off?.hoursTargetIsAvailable == false)
+    }
+
     // MARK: Popover — week slice
 
     @Test func weekSliceIsWeekLocalAndStopsAtElapsedDays() {

@@ -194,12 +194,16 @@ struct MenuBarPresentationTests {
             .init(
                 client: client(id: 1, name: "Cornerstone"),
                 actualRevenue: 500,
-                targetRevenue: 1_000
+                targetRevenue: 1_000,
+                actualHours: 5,
+                targetHours: 10
             ),
             .init(
                 client: client(id: 2, name: "Providence"),
                 actualRevenue: 750,
-                targetRevenue: 1_000
+                targetRevenue: 1_000,
+                actualHours: 7.5,
+                targetHours: 10
             ),
         ])
     }

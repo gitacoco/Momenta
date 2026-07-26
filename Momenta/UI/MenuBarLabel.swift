@@ -60,6 +60,14 @@ struct MenuBarPresentation: Equatable, Sendable {
             fraction: aggregateFraction
         )
         let clientObjects = aggregate.shares.map { share in
+            // Follow the display unit: a non-billable client has no revenue,
+            // so its revenue ring would read a meaningless 100%.
+            let clientFraction: Double? = switch unit {
+            case .revenue:
+                share.targetIsAvailable ? share.fraction : nil
+            case .hours:
+                share.hoursTargetIsAvailable ? share.hoursFraction : nil
+            }
             let name = share.client.displayName
             let firstCharacter = name
                 .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -69,7 +77,7 @@ struct MenuBarPresentation: Equatable, Sendable {
                 id: "client-\(share.id)",
                 name: name,
                 monogram: firstCharacter.isEmpty ? "•" : String(firstCharacter.prefix(1)),
-                fraction: share.targetIsAvailable ? share.fraction : nil
+                fraction: clientFraction
             )
         }
 

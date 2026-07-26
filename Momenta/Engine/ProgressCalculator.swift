@@ -49,6 +49,12 @@ struct AggregateProgress: Sendable {
         /// A zero target can still be meaningful: once the monthly goal is
         /// complete, "per day to goal" is zero and today's ring is complete.
         var targetIsAvailable: Bool
+        /// Hours track, carried alongside revenue so the menu-bar per-client
+        /// ring can follow the display unit. Non-billable clients have no
+        /// revenue, so the hours ring is the only meaningful one for them.
+        var actualHours: Decimal
+        var targetHours: Decimal
+        var hoursTargetIsAvailable: Bool
 
         var id: Int { client.id }
 
@@ -57,16 +63,27 @@ struct AggregateProgress: Sendable {
             return (actualRevenue / targetRevenue).doubleValue
         }
 
+        var hoursFraction: Double {
+            guard targetHours > 0 else { return hoursTargetIsAvailable ? 1 : 0 }
+            return (actualHours / targetHours).doubleValue
+        }
+
         init(
             client: ClientConfig,
             actualRevenue: Decimal,
             targetRevenue: Decimal,
-            targetIsAvailable: Bool? = nil
+            actualHours: Decimal = 0,
+            targetHours: Decimal = 0,
+            targetIsAvailable: Bool? = nil,
+            hoursTargetIsAvailable: Bool? = nil
         ) {
             self.client = client
             self.actualRevenue = actualRevenue
             self.targetRevenue = targetRevenue
+            self.actualHours = actualHours
+            self.targetHours = targetHours
             self.targetIsAvailable = targetIsAvailable ?? (targetRevenue > 0)
+            self.hoursTargetIsAvailable = hoursTargetIsAvailable ?? (targetHours > 0)
         }
     }
 
@@ -321,17 +338,23 @@ enum ProgressCalculator {
 
         var shares: [AggregateProgress.ClientShare] = []
         var totalGoalRevenue: Decimal = 0
-        var totalGoalHours: Decimal = 0
         // Work completed strictly before the reference day started. Summed
         // from entry start times directly (not month − referenceDay) so a
         // back-stepped day doesn't count later days' work as "before".
         var actualRevenueBeforeDay: Decimal = 0
-        var actualHoursBeforeDay: Decimal = 0
         // Summed period actual/target hours across clients — the popover's
         // hours-mode Overall. Meaningless as physics (rates differ), but the
         // user opted into a summed-hours readout.
         var periodActualHours: Decimal = 0
         var periodTargetHours: Decimal = 0
+        // The day Overall's hours track, accumulated only over clients
+        // scheduled today. Unlike the pooled revenue target, hours are not
+        // fungible across clients, so a client that is off today must not
+        // push its catch-up onto today's target — and, symmetrically, hours
+        // logged on a day off must not complete another client's goal. They
+        // still count on that client's card and in the week/month.
+        var scheduledHoursTargetToday: Decimal = 0
+        var scheduledActualHoursToday: Decimal = 0
         var aggregateWeights = [Int](repeating: 0, count: month.dayCount(in: timeZone))
         for client in clients where client.state(for: month) == .configured {
             guard let goal = client.goal(for: month),
@@ -369,9 +392,7 @@ enum ProgressCalculator {
                 }
             }
             totalGoalRevenue += goal.revenue
-            totalGoalHours += goal.hours
             actualRevenueBeforeDay += beforeDayHours * goal.hourlyRate
-            actualHoursBeforeDay += beforeDayHours
             periodActualHours += hours
 
             // Today's ring uses the same dynamic catch-up pace shown on the
@@ -381,6 +402,7 @@ enum ProgressCalculator {
             let targetHours: Decimal
             let target: Decimal
             let targetIsAvailable: Bool
+            let hoursAvailable: Bool
             if period == .day {
                 // A day the client doesn't work has no target, so its By-Client
                 // ring reads neutral rather than behind — the same treatment the
@@ -388,6 +410,8 @@ enum ProgressCalculator {
                 let workWeekdays = client.pacing.workWeekdays(custom: client.customWorkDays)
                 let scheduledToday = workWeekdays.contains(calendar.component(.weekday, from: interval.start))
                 if scheduledToday {
+                    // The card/ring show the live pace (falls as work is logged
+                    // today); the Overall below sums the frozen pace instead.
                     targetHours = requiredDailyHours(
                         goal: goal,
                         actualHours: monthHours,
@@ -399,15 +423,31 @@ enum ProgressCalculator {
                     )
                     target = targetHours * goal.hourlyRate
                     targetIsAvailable = true
+                    hoursAvailable = true
+                    scheduledActualHoursToday += hours
+                    // Freeze the denominator at the reference day (not the live
+                    // clock) so a back-stepped day shows the pace it had then,
+                    // matching the day slice and the pooled revenue target.
+                    scheduledHoursTargetToday += requiredDailyHours(
+                        goal: goal,
+                        actualHours: beforeDayHours,
+                        month: month,
+                        pacing: client.pacing,
+                        customWorkDays: client.customWorkDays,
+                        timeZone: timeZone,
+                        now: interval.start
+                    )
                 } else {
                     targetHours = 0
                     target = 0
                     targetIsAvailable = false
+                    hoursAvailable = false
                 }
             } else if totalWeight == 0 {
                 targetHours = 0
                 target = 0
                 targetIsAvailable = false
+                hoursAvailable = false
             } else {
                 // Multiply before dividing so a divisible slice stays exact
                 // (e.g. 3680 × 5 / 23 == 800, not 799.99…). This keeps the
@@ -415,6 +455,7 @@ enum ProgressCalculator {
                 targetHours = goal.hours * Decimal(periodWeight) / Decimal(totalWeight)
                 target = goal.revenue * Decimal(periodWeight) / Decimal(totalWeight)
                 targetIsAvailable = target > 0
+                hoursAvailable = targetHours > 0
             }
             periodTargetHours += targetHours
 
@@ -422,7 +463,10 @@ enum ProgressCalculator {
                 client: client,
                 actualRevenue: hours * goal.hourlyRate,
                 targetRevenue: target,
-                targetIsAvailable: targetIsAvailable
+                actualHours: hours,
+                targetHours: targetHours,
+                targetIsAvailable: targetIsAvailable,
+                hoursTargetIsAvailable: hoursAvailable
             ))
         }
 
@@ -437,16 +481,17 @@ enum ProgressCalculator {
             )
         }
 
-        // Overall freezes the day's target at the start of the reference day
-        // so work performed that day cannot lower its own denominator. Only
-        // work strictly before the day start reduces the remaining goal — a
-        // back-stepped day must not have later days' work subtracted either.
-        // Revenue above one client's goal offsets another's gap; the hours
-        // track mirrors the same freeze for the popover's summed-hours Overall.
+        // Overall freezes the day's revenue target at the start of the
+        // reference day so work performed that day cannot lower its own
+        // denominator. Only work strictly before the day start reduces the
+        // remaining goal — a back-stepped day must not have later days' work
+        // subtracted either. Revenue above one client's goal offsets another's
+        // gap. Hours use the scheduled-clients-only accumulators so both sides
+        // of the fraction cover the same cohort: a rest-day client neither
+        // raises today's target nor completes it.
         let todayActualRevenue = shares.reduce(0) { $0 + $1.actualRevenue }
         let remainingRevenueAtDayStart = max(0, totalGoalRevenue - actualRevenueBeforeDay)
-        let todayActualHours = periodActualHours
-        let remainingHoursAtDayStart = max(0, totalGoalHours - actualHoursBeforeDay)
+        let todayActualHours = scheduledActualHoursToday
         let calendar = YearMonth.calendar(in: timeZone)
         let monthStart = month.start(in: timeZone)
         var todayIsScheduled = false
@@ -461,12 +506,13 @@ enum ProgressCalculator {
             }
         }
         let scheduledToday = todayIsScheduled && remainingScheduledDays > 0
+        // Revenue is a fungible pool (one client's surplus offsets another's
+        // gap), so it keeps the blended per-day pace. Hours are summed per
+        // client and already exclude clients who are off today.
         let overallTarget = scheduledToday
             ? remainingRevenueAtDayStart / Decimal(remainingScheduledDays)
             : Decimal(0)
-        let overallTargetHours = scheduledToday
-            ? remainingHoursAtDayStart / Decimal(remainingScheduledDays)
-            : Decimal(0)
+        let overallTargetHours = scheduledHoursTargetToday
 
         return AggregateProgress(
             shares: shares,
@@ -679,7 +725,10 @@ enum ProgressCalculator {
                 client: slice.client,
                 actualRevenue: slice.actualRevenue,
                 targetRevenue: slice.targetRevenue ?? 0,
-                targetIsAvailable: true
+                actualHours: slice.actualHours,
+                targetHours: slice.targetHours ?? 0,
+                targetIsAvailable: true,
+                hoursTargetIsAvailable: true
             )
         }
         let actualHours = contributing.reduce(Decimal(0)) { $0 + $1.actualHours }
