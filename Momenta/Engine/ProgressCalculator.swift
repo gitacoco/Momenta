@@ -138,6 +138,13 @@ struct ClientPeriodSlice: Identifiable, Sendable {
     /// actuals render, but there is no target line, delta, or pace).
     var hasGoal: Bool
 
+    /// Day period only: the reference day is not one of this client's scheduled
+    /// work days, so its planned increment is flat (zero). The card shows a
+    /// "day off" state with no target and no behind/ahead debt — matching the
+    /// Overall ring, which already zeroes an unscheduled day. Always false for
+    /// week and month.
+    var isRestDay: Bool = false
+
     /// Cumulative points to chart (week: the week's days; month: the whole
     /// month). Empty for day (the day card is a bullet, not a chart).
     var points: [DayProgressPoint]
@@ -364,17 +371,28 @@ enum ProgressCalculator {
             let target: Decimal
             let targetIsAvailable: Bool
             if period == .day {
-                targetHours = requiredDailyHours(
-                    goal: goal,
-                    actualHours: monthHours,
-                    month: month,
-                    pacing: client.pacing,
-                    customWorkDays: client.customWorkDays,
-                    timeZone: timeZone,
-                    now: now
-                )
-                target = targetHours * goal.hourlyRate
-                targetIsAvailable = true
+                // A day the client doesn't work has no target, so its By-Client
+                // ring reads neutral rather than behind — the same treatment the
+                // Overall ring already gives an unscheduled day below.
+                let workWeekdays = client.pacing.workWeekdays(custom: client.customWorkDays)
+                let scheduledToday = workWeekdays.contains(calendar.component(.weekday, from: interval.start))
+                if scheduledToday {
+                    targetHours = requiredDailyHours(
+                        goal: goal,
+                        actualHours: monthHours,
+                        month: month,
+                        pacing: client.pacing,
+                        customWorkDays: client.customWorkDays,
+                        timeZone: timeZone,
+                        now: now
+                    )
+                    target = targetHours * goal.hourlyRate
+                    targetIsAvailable = true
+                } else {
+                    targetHours = 0
+                    target = 0
+                    targetIsAvailable = false
+                }
             } else if totalWeight == 0 {
                 targetHours = 0
                 target = 0
@@ -474,7 +492,15 @@ enum ProgressCalculator {
             actual = max(0, cumulativeThrough - cumulativeBefore)
         }
 
-        let target: Decimal? = progress.goal.map { goal in
+        // A day the client doesn't work carries a flat plan: no target for the
+        // day, so logging nothing is not "behind". The catch-up pace is a
+        // month-level idea; surfacing it as this day's goal is exactly the
+        // artificial debt the pacing schedule exists to avoid.
+        let workWeekdays = progress.client.pacing.workWeekdays(custom: progress.client.customWorkDays)
+        let isScheduledDay = workWeekdays.contains(calendar.component(.weekday, from: refDayStart))
+        let isRestDay = progress.goal != nil && !isScheduledDay
+
+        let target: Decimal? = isRestDay ? nil : progress.goal.map { goal in
             if isCurrentDay {
                 return progress.requiredDailyHours ?? goal.hours
             }
@@ -494,6 +520,7 @@ enum ProgressCalculator {
             period: .day,
             hourlyRate: rate,
             hasGoal: progress.goal != nil,
+            isRestDay: isRestDay,
             points: [],
             actualHours: actual,
             actualRevenue: actual * rate,

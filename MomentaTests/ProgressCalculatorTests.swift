@@ -522,6 +522,67 @@ struct ProgressCalculatorTests {
         #expect(slice.targetHours == expected)
     }
 
+    @Test func daySliceOnRestDayHasNoTargetOrDebt() {
+        let goal = MonthlyGoal(hourlyRate: 100, input: .hours(50))
+        var config = client(pacing: .custom, goal: goal)
+        config.customWorkDays = [1, 2, 3, 4, 7] // Thursday and Friday off
+        let now = date(day: 23, hour: 16) // Thursday — a scheduled day off
+        let entries = [
+            TimeEntry(id: 1, clientID: 1, start: date(day: 1, hour: 8), stop: date(day: 1, hour: 18)),
+        ]
+        let progress = ProgressCalculator.progress(
+            for: config, entries: entries, month: july, timeZone: utc, now: now
+        )!
+        let slice = ProgressCalculator.daySlice(
+            progress: progress, reference: now, isCurrentDay: true, timeZone: utc
+        )
+        // A day off carries a flat plan: no target and no behind/ahead debt,
+        // even though the client still has a monthly goal in effect.
+        #expect(slice.isRestDay)
+        #expect(slice.hasGoal)
+        #expect(slice.targetHours == nil)
+        #expect(slice.deltaHours == nil)
+    }
+
+    @Test func daySliceOnAScheduledDayKeepsCatchUpPace() {
+        let goal = MonthlyGoal(hourlyRate: 100, input: .hours(50))
+        var config = client(pacing: .custom, goal: goal)
+        config.customWorkDays = [1, 2, 3, 4, 7] // Thursday and Friday off
+        let now = date(day: 22, hour: 16) // Wednesday — a work day
+        let entries = [
+            TimeEntry(id: 1, clientID: 1, start: date(day: 1, hour: 8), stop: date(day: 1, hour: 18)),
+        ]
+        let progress = ProgressCalculator.progress(
+            for: config, entries: entries, month: july, timeZone: utc, now: now
+        )!
+        let slice = ProgressCalculator.daySlice(
+            progress: progress, reference: now, isCurrentDay: true, timeZone: utc
+        )
+        #expect(!slice.isRestDay)
+        #expect(slice.targetHours == progress.requiredDailyHours)
+    }
+
+    @Test func dayClientShareAndOverallAreNeutralOnRestDay() {
+        let goal = MonthlyGoal(hourlyRate: 100, input: .hours(50))
+        var config = client(pacing: .custom, goal: goal)
+        config.customWorkDays = [1, 2, 3, 4, 7] // Thursday and Friday off
+        let now = date(day: 23, hour: 16) // Thursday — a scheduled day off
+        let entries = [
+            TimeEntry(id: 1, clientID: 1, start: date(day: 1, hour: 8), stop: date(day: 1, hour: 18)),
+        ]
+        let aggregate = ProgressCalculator.aggregate(
+            clients: [config], entries: entries, month: july,
+            period: .day, timeZone: utc, now: now
+        )
+        // The By-Client ring reads neutral, not behind, and the Overall ring
+        // zeroes the unscheduled day (100% against a 0 target) — the two views
+        // now agree instead of diverging.
+        #expect(aggregate.shares[0].targetRevenue == 0)
+        #expect(!aggregate.shares[0].targetIsAvailable)
+        #expect(aggregate.targetRevenue == 0)
+        #expect(aggregate.fraction == 1)
+    }
+
     // MARK: Popover — week slice
 
     @Test func weekSliceIsWeekLocalAndStopsAtElapsedDays() {

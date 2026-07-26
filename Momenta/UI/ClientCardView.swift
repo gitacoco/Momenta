@@ -561,6 +561,8 @@ struct ClientCardView: View {
             guard let goal = progress.goal else { return nil }
             return unitText(hours: goal.hours, revenue: goal.revenue)
         case .day(let slice), .week(let slice):
+            // A rest day has no target; the pace lives on other periods.
+            if slice.isRestDay { return "—" }
             guard let hours = slice.targetHours, let revenue = slice.targetRevenue else { return nil }
             return unitText(hours: hours, revenue: revenue)
         }
@@ -824,7 +826,20 @@ struct ClientCardView: View {
 
     @ViewBuilder
     private func dayBullet(_ slice: ClientPeriodSlice) -> some View {
-        if let targetHours = slice.targetHours, targetHours > 0 {
+        if slice.isRestDay {
+            // A scheduled day off: flat plan, so no bullet and no behind/ahead
+            // badge. Any hours logged anyway are shown as a bonus, not debt.
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text("Day off")
+                    .font(.title3.weight(.semibold))
+                if slice.actualHours > 0 {
+                    Text("· \(unitText(hours: slice.actualHours, revenue: slice.actualRevenue)) logged")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+            }
+        } else if let targetHours = slice.targetHours, targetHours > 0 {
             let fraction = min(max((slice.actualHours / targetHours).doubleValue, 0), 1)
             VStack(alignment: .leading, spacing: 4) {
                 GeometryReader { proxy in
