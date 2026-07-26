@@ -86,6 +86,11 @@ final class AppState {
     var clientListAPIError: TogglAPIError?
     /// Popover chart unit toggle. View state only, resets with the process.
     var displayUnit: DisplayUnit = .hours
+    /// Visible height of the screen hosting the status item, captured by the
+    /// controller just before the popover opens. `NSScreen.main` is the
+    /// keyboard-focused window's screen — often another app's for a menu bar
+    /// app — so the popover height cap reads this instead.
+    var statusItemScreenVisibleHeight: CGFloat?
     /// Historical anchor for the popover's period navigation. `nil` means
     /// "follow `displayNow`" — the current period is then never a stored value
     /// that can go stale, and the popover agrees with the menu bar at every

@@ -4,17 +4,50 @@ import SwiftUI
 struct DashboardView: View {
     @Environment(AppState.self) private var appState
 
+    /// Measured heights of the chrome around the scroll area, so the screen
+    /// clamp tracks fonts, localization, and multi-line error footers instead
+    /// of trusting an estimate.
+    @State private var headerHeight: CGFloat = 0
+    @State private var footerHeight: CGFloat = 0
+
+    /// Allowance for the popover parts outside this view: the arrow plus the
+    /// system's margins against the menu bar and screen edges.
+    private static let popoverArrowAllowance: CGFloat = 30
+
     /// The content remains scrollable for long client lists, but shorter
     /// lists report their natural height to the hosting controller.
-    private let maximumContentHeight: CGFloat = 582
+    ///
+    /// A month/week card is ~207pt (12pt insets, 26pt header + 8pt, 110pt
+    /// chart + 8pt, ~23pt metrics), so three of them plus the Overall row and
+    /// the 10pt gaps need ~700pt. The cap sits above that so three cards never
+    /// scroll, and is clamped to the status item's screen so a taller list
+    /// can't grow the popover past the display it opens on.
+    private var maximumContentHeight: CGFloat {
+        let preferred: CGFloat = 760
+        let chrome = headerHeight + footerHeight + 2 + Self.popoverArrowAllowance
+        guard let screenHeight = appState.statusItemScreenVisibleHeight
+            ?? (NSScreen.main ?? NSScreen.screens.first)?.visibleFrame.height
+        else { return preferred }
+        // No lower floor: a floor would be the one case that breaks the
+        // promise this cap exists for. Real Macs leave 600pt+ after the
+        // measured chrome, so it would only ever engage on a display where
+        // honouring it means overflowing the screen.
+        return max(0, min(preferred, screenHeight - chrome))
+    }
 
     var body: some View {
         VStack(spacing: 0) {
             header
+                .onGeometryChange(for: CGFloat.self, of: { $0.size.height }) {
+                    headerHeight = $0
+                }
             Divider()
             content
             Divider()
             footer
+                .onGeometryChange(for: CGFloat.self, of: { $0.size.height }) {
+                    footerHeight = $0
+                }
         }
         // Only the width is fixed. The hosting controller derives the
         // popover height from the view's actual content.

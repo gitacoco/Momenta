@@ -92,6 +92,10 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
             popover.performClose(nil)
         } else if let button = statusItem.button {
             closeAnchorWindow()
+            // The popover opens on the status item's screen, which is not
+            // necessarily `NSScreen.main` (the keyboard-focused window's
+            // screen, often another app's). Capture it for the height cap.
+            appState.statusItemScreenVisibleHeight = button.window?.screen?.visibleFrame.height
             // The status item lives in its own window that the system slides
             // sideways whenever the item resizes (as the menu-bar label tracks
             // the period). Anchoring to the button — or any view inside that
