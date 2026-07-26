@@ -110,8 +110,28 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
                 target = button
             }
             popover.show(relativeTo: target.bounds, of: target, preferredEdge: .minY)
-            popover.contentViewController?.view.window?.makeKey()
-            NSApp.activate()
+            // Activation is asynchronous: `NSApp.isActive` stays false for the
+            // rest of this turn, so claiming key here is a no-op and the
+            // popover opens unfocused until the next click. Activate now and
+            // take key on the following turn, which covers both cases — a
+            // background app has activated by then (AppKit assigns key itself),
+            // and an already-active app fires no activation event, so it needs
+            // this explicit makeKey.
+            //
+            // The deprecated forced variant is deliberate: cooperative
+            // `activate()` is refused for this LSUIElement app while another
+            // app holds the front, leaving the popover keyboard-reachable but
+            // rendering in its inactive (translucent) material.
+            NSApp.activate(ignoringOtherApps: true)
+            let shownWindow = popover.contentViewController?.view.window
+            DispatchQueue.main.async { [weak self] in
+                // The popover may have closed (or reopened elsewhere) within
+                // the turn; only claim key for the presentation we started.
+                guard let self, self.popover.isShown,
+                      let window = self.popover.contentViewController?.view.window,
+                      window == shownWindow else { return }
+                window.makeKey()
+            }
             installDismissMonitors()
         }
     }
