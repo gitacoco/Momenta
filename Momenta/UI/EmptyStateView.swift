@@ -28,7 +28,7 @@ struct EmptyStateView: View {
             VStack(alignment: .leading, spacing: 8) {
                 step(1, "Connect your Toggl account", done: tokenDone)
                 step(2, "Enable the clients you want to track", done: clientsDone)
-                step(3, "Set an hourly rate and monthly goal for each", done: goalsDone)
+                step(3, "Set a monthly goal for each", done: goalsDone)
             }
             Button(tokenDone ? "Continue in Settings" : "Open Settings") {
                 // Land on the step the user is actually on.

@@ -12,6 +12,12 @@ struct SyncedClientConfig: Codable, Equatable, Sendable {
     var customWorkDays: Set<Int>?
     var goalHistory: [YearMonth: MonthlyGoal]
     var currencyCode: String?
+    /// Mirrors `ClientConfig.billableFlag` (nil == billable). Optional so
+    /// payloads written before this field decode cleanly.
+    var billableFlag: Bool?
+    /// Mirrors `ClientConfig.dormantHourlyRate`: the rate parked while billing
+    /// is off, so re-enabling on another Mac can still offer it.
+    var dormantHourlyRate: Decimal?
     /// A content identity, not a local file name. The matching bytes live in
     /// a separate per-client CKAsset record.
     var logoRevision: String?
@@ -25,6 +31,8 @@ struct SyncedClientConfig: Codable, Equatable, Sendable {
         customWorkDays: Set<Int>? = nil,
         goalHistory: [YearMonth: MonthlyGoal],
         currencyCode: String?,
+        billableFlag: Bool? = nil,
+        dormantHourlyRate: Decimal? = nil,
         logoRevision: String?
     ) {
         self.clientID = clientID
@@ -35,6 +43,8 @@ struct SyncedClientConfig: Codable, Equatable, Sendable {
         self.customWorkDays = customWorkDays
         self.goalHistory = goalHistory
         self.currencyCode = currencyCode
+        self.billableFlag = billableFlag
+        self.dormantHourlyRate = dormantHourlyRate
         self.logoRevision = logoRevision
     }
 
@@ -47,6 +57,8 @@ struct SyncedClientConfig: Codable, Equatable, Sendable {
         customWorkDays = client.customWorkDays
         goalHistory = client.goalHistory
         currencyCode = client.currencyCode
+        billableFlag = client.billableFlag
+        dormantHourlyRate = client.dormantHourlyRate
         self.logoRevision = logoRevision
     }
 
@@ -59,8 +71,23 @@ struct SyncedClientConfig: Codable, Equatable, Sendable {
         projected.customWorkDays = customWorkDays
         projected.goalHistory = goalHistory
         projected.currencyCode = currencyCode
+        projected.billableFlag = billableFlag
+        projected.dormantHourlyRate = dormantHourlyRate
         projected.logoFileName = localLogoFileName
         return projected
+    }
+
+    /// Re-establishes the invariant `ClientConfig.setBillable(true)` keeps: a
+    /// billable client records a rate on every goal version. A merge can take
+    /// the flag from one side and a rate-less month from the other, and the
+    /// editor's recovery would not repair it — that only inspects the current
+    /// month, which the same merge can leave complete.
+    mutating func normalizeBillingRates() {
+        goalHistory = BillingRates.normalized(
+            history: goalHistory,
+            isBillable: billableFlag ?? true,
+            dormantRate: dormantHourlyRate
+        )
     }
 
     /// Toggl reconciliation creates disabled clients with deterministic
@@ -74,6 +101,8 @@ struct SyncedClientConfig: Codable, Equatable, Sendable {
             || customWorkDays != nil
             || !goalHistory.isEmpty
             || currencyCode != nil
+            || billableFlag != nil
+            || dormantHourlyRate != nil
             || logoRevision != nil
     }
 }
@@ -179,12 +208,31 @@ struct SyncedConfigPayload: Codable, Equatable, Sendable {
                 chosen.goalHistory = local.goalHistory.merging(server.goalHistory) { _, serverValue in
                     serverValue
                 }
+                // Optional settings the server never authored fall back to
+                // this Mac's value rather than being erased by adoption.
+                // `dormantHourlyRate` makes this load-bearing rather than
+                // cosmetic: it is the only remaining record of the rate a
+                // non-billable client restores from, so dropping it takes the
+                // recovery data with it.
                 if chosen.logoRevision == nil {
                     chosen.logoRevision = local.logoRevision
                 }
                 if chosen.displayNameOverride == nil {
                     chosen.displayNameOverride = local.displayNameOverride
                 }
+                if chosen.billableFlag == nil {
+                    chosen.billableFlag = local.billableFlag
+                }
+                if chosen.dormantHourlyRate == nil {
+                    chosen.dormantHourlyRate = local.dormantHourlyRate
+                }
+                if chosen.customWorkDays == nil {
+                    chosen.customWorkDays = local.customWorkDays
+                }
+                if chosen.currencyCode == nil {
+                    chosen.currencyCode = local.currencyCode
+                }
+                chosen.normalizeBillingRates()
                 mergedClients[id] = chosen
             case (let local?, nil):
                 mergedClients[id] = local
@@ -213,7 +261,7 @@ struct SyncedConfigPayload: Codable, Equatable, Sendable {
         local: SyncedClientConfig,
         server: SyncedClientConfig
     ) -> SyncedClientConfig {
-        SyncedClientConfig(
+        var merged = SyncedClientConfig(
             clientID: local.clientID,
             displayNameOverride: mergeField(
                 base: base?.displayNameOverride,
@@ -241,12 +289,26 @@ struct SyncedConfigPayload: Codable, Equatable, Sendable {
                 local: local.currencyCode,
                 server: server.currencyCode
             ),
+            billableFlag: mergeField(
+                base: base?.billableFlag,
+                local: local.billableFlag,
+                server: server.billableFlag
+            ),
+            dormantHourlyRate: mergeField(
+                base: base?.dormantHourlyRate,
+                local: local.dormantHourlyRate,
+                server: server.dormantHourlyRate
+            ),
             logoRevision: mergeField(
                 base: base?.logoRevision,
                 local: local.logoRevision,
                 server: server.logoRevision
             )
         )
+        // The fields above merge independently, so the billing flag and the
+        // goal months can come from different sides.
+        merged.normalizeBillingRates()
+        return merged
     }
 
     private static func mergeDictionary<Key: Hashable & Sendable, Value: Equatable & Sendable>(
@@ -297,7 +359,14 @@ struct SyncedConfigPayload: Codable, Equatable, Sendable {
 /// Persisted per-account sync state. `shadow` remains complete even when the
 /// current Toggl/UI projection is incomplete; `base` is strictly device-local.
 struct ConfigSyncLocalState: Codable, Equatable, Sendable {
-    static let supportedSchemaVersion = 1
+    /// Version 2 introduced `billableFlag` and `dormantHourlyRate`. The bump
+    /// is what protects each field: a version-1 device would decode the
+    /// payload fine (unknown keys are ignored), then re-upload without the
+    /// field, and a three-way merge on the newer device would read that as an
+    /// explicit revert to billable. Failing closed on the older device instead
+    /// routes it through the existing unsupported-schema stop until it
+    /// updates.
+    static let supportedSchemaVersion = 2
 
     var shadow: SyncedConfigPayload
     var base: SyncedConfigPayload?

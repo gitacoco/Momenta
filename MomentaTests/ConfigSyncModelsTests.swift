@@ -13,6 +13,11 @@ struct ConfigSyncModelsTests {
         enabled: Bool = false,
         pacing: PacingMode = .weekdays,
         customWorkDays: Set<Int>? = nil,
+        billableFlag: Bool? = nil,
+        dormantHourlyRate: Decimal? = nil,
+        // Nil means "never authored on this side" — the case the initial
+        // merge's fallbacks turn on.
+        currencyCode: String? = "USD",
         goals: [YearMonth: MonthlyGoal] = [:],
         logo: String? = nil
     ) -> SyncedClientConfig {
@@ -24,7 +29,9 @@ struct ConfigSyncModelsTests {
             pacing: pacing,
             customWorkDays: customWorkDays,
             goalHistory: goals,
-            currencyCode: "USD",
+            currencyCode: currencyCode,
+            billableFlag: billableFlag,
+            dormantHourlyRate: dormantHourlyRate,
             logoRevision: logo
         )
     }
@@ -122,6 +129,73 @@ struct ConfigSyncModelsTests {
         #expect(projected?.customWorkDays == [2, 3, 4, 5])
     }
 
+    @Test func billableFlagRoundTripsAndProjectsAsAField() throws {
+        let base = payload([client(7, billableFlag: nil)])
+        let local = payload([client(7, billableFlag: false, dormantHourlyRate: 120)])
+        let server = base
+
+        let merged = SyncedConfigPayload.merge(base: base, local: local, server: server)
+        let encoded = try JSONEncoder().encode(merged)
+        let decoded = try JSONDecoder().decode(SyncedConfigPayload.self, from: encoded)
+        let projected = decoded.clients[7]?.applying(
+            to: ClientConfig(
+                id: 7,
+                workspaceID: 10,
+                workspaceName: "Studio",
+                togglName: "Client",
+                displayNameOverride: nil,
+                colorHex: ConfigStore.defaultColor(for: 7),
+                isEnabled: false,
+                isArchivedInToggl: false,
+                pacing: .weekdays,
+                goalHistory: [:]
+            ),
+            localLogoFileName: nil
+        )
+
+        #expect(decoded.clients[7]?.billableFlag == false)
+        #expect(projected?.billableFlag == false)
+        #expect(projected?.isBillable == false)
+        // The parked rate travels with the flag, so re-enabling billing on
+        // another Mac can still offer it.
+        #expect(decoded.clients[7]?.dormantHourlyRate == 120)
+        #expect(projected?.restorableHourlyRate == 120)
+    }
+
+    @Test func absentBillableFlagMeansBillableAndNotUserAuthored() {
+        // A true default row (no billable flag) stays billable and does not,
+        // on its own, count as user settings that force a first-sync prompt.
+        let defaults = SyncedClientConfig(
+            clientID: 7,
+            displayNameOverride: nil,
+            colorHex: ConfigStore.defaultColor(for: 7),
+            isEnabled: false,
+            pacing: .weekdays,
+            goalHistory: [:],
+            currencyCode: nil,
+            logoRevision: nil
+        )
+        #expect(defaults.billableFlag == nil)
+        #expect(defaults.hasUserSettings == false)
+
+        let projected = defaults.applying(
+            to: ClientConfig(
+                id: 7,
+                workspaceID: 10,
+                workspaceName: "Studio",
+                togglName: "Client",
+                displayNameOverride: nil,
+                colorHex: ConfigStore.defaultColor(for: 7),
+                isEnabled: false,
+                isArchivedInToggl: false,
+                pacing: .weekdays,
+                goalHistory: [:]
+            ),
+            localLogoFileName: nil
+        )
+        #expect(projected.isBillable)
+    }
+
     @Test func MissingProjectedClientSurvivesAnotherClientEditAndUpload() {
         let remoteOnlyGoal = MonthlyGoal(hourlyRate: 200, input: .revenue(20_000))
         let base = payload([
@@ -172,6 +246,107 @@ struct ConfigSyncModelsTests {
         #expect(merged.clients[2] != nil)
         #expect(merged.clients[3] != nil)
         #expect(merged.order == [3, 1, 2])
+    }
+
+    @Test func initialMergeKeepsLocalSettingsTheServerNeverAuthored() {
+        // Adoption takes the server's client wholesale, so anything only this
+        // Mac ever set has to be rescued. `dormantHourlyRate` is the sharp
+        // case: it is the only record of the rate a non-billable client
+        // restores from, so losing it here is unrecoverable — the editor
+        // fallback would have nothing left to offer.
+        let local = payload([
+            client(
+                1,
+                customWorkDays: [2, 4],
+                billableFlag: false,
+                dormantHourlyRate: 120,
+                currencyCode: "EUR"
+            ),
+        ])
+        let server = payload([client(1, color: "#FF0000", currencyCode: nil)])
+
+        let merged = SyncedConfigPayload.initialMerge(local: local, server: server)
+
+        #expect(merged.clients[1]?.colorHex == "#FF0000")
+        #expect(merged.clients[1]?.billableFlag == false)
+        #expect(merged.clients[1]?.dormantHourlyRate == 120)
+        #expect(merged.clients[1]?.customWorkDays == [2, 4])
+        #expect(merged.clients[1]?.currencyCode == "EUR")
+    }
+
+    @Test func initialMergeLeavesNoRatelessMonthOnABillableClient() {
+        // The flag comes from the server, the rate-less month from this Mac.
+        // The editor's recovery cannot repair this one: it inspects the
+        // current month, and July is already complete.
+        let june = YearMonth(year: 2026, month: 6)
+        let local = payload([
+            client(1, billableFlag: false, goals: [june: MonthlyGoal(hourlyRate: 0, input: .hours(15))]),
+        ])
+        let server = payload([
+            client(1, billableFlag: true, goals: [july: MonthlyGoal(hourlyRate: 80, input: .hours(40))]),
+        ])
+
+        let merged = SyncedConfigPayload.initialMerge(local: local, server: server)
+
+        #expect(merged.clients[1]?.billableFlag == true)
+        #expect(merged.clients[1]?.goalHistory[june]?.hourlyRate == 80)
+        #expect(merged.clients[1]?.goalHistory[june]?.hours == 15)
+        #expect(merged.clients[1]?.goalHistory[july]?.hourlyRate == 80)
+    }
+
+    @Test func threeWayMergeLeavesNoRatelessMonthOnABillableClient() {
+        // Same split, reached the other way: only the server flips billing,
+        // so the flag and the goal months resolve from different sides.
+        let june = YearMonth(year: 2026, month: 6)
+        let ratelessJune = MonthlyGoal(hourlyRate: 0, input: .hours(15))
+        let base = payload([client(1, billableFlag: false, goals: [june: ratelessJune])])
+        let local = base
+        let server = payload([
+            client(
+                1,
+                billableFlag: true,
+                goals: [june: ratelessJune, july: MonthlyGoal(hourlyRate: 80, input: .hours(40))]
+            ),
+        ])
+
+        let merged = SyncedConfigPayload.merge(base: base, local: local, server: server)
+
+        #expect(merged.clients[1]?.billableFlag == true)
+        #expect(merged.clients[1]?.goalHistory[june]?.hourlyRate == 80)
+        #expect(merged.clients[1]?.goalHistory[june]?.hours == 15)
+    }
+
+    @Test func mergeLeavesANonBillableClientsRatelessMonthsAlone() {
+        let june = YearMonth(year: 2026, month: 6)
+        let local = payload([
+            client(
+                1,
+                billableFlag: false,
+                dormantHourlyRate: 120,
+                goals: [june: MonthlyGoal(hourlyRate: 0, input: .hours(15))]
+            ),
+        ])
+        let server = payload([client(1, billableFlag: false, dormantHourlyRate: 120)])
+
+        let merged = SyncedConfigPayload.initialMerge(local: local, server: server)
+
+        #expect(merged.clients[1]?.billableFlag == false)
+        #expect(merged.clients[1]?.goalHistory[june]?.hourlyRate == 0)
+    }
+
+    @Test func initialMergeStillPrefersTheServerWhereBothSidesAuthored() {
+        let local = payload([
+            client(1, billableFlag: false, dormantHourlyRate: 120, currencyCode: "EUR"),
+        ])
+        let server = payload([
+            client(1, billableFlag: true, dormantHourlyRate: 80, currencyCode: "GBP"),
+        ])
+
+        let merged = SyncedConfigPayload.initialMerge(local: local, server: server)
+
+        #expect(merged.clients[1]?.billableFlag == true)
+        #expect(merged.clients[1]?.dormantHourlyRate == 80)
+        #expect(merged.clients[1]?.currencyCode == "GBP")
     }
 
     @Test func syncStateStorePersistsShadowBaseAndDirtyState() {

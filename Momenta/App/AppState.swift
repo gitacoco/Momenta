@@ -625,6 +625,19 @@ final class AppState {
         clients.filter { $0.isEnabled && !$0.isArchivedInToggl }
     }
 
+    /// A non-billable client has no revenue, so it drops out of the popover,
+    /// Overall, and menu bar while the display unit is revenue; hours mode
+    /// shows everyone. Both the popover and the menu bar follow `displayUnit`,
+    /// so gating the shown set here keeps cards and aggregates consistent.
+    func isShownForCurrentUnit(_ client: ClientConfig) -> Bool {
+        displayUnit == .hours || client.isBillable
+    }
+
+    /// `visibleClients` narrowed to what the active display unit shows.
+    var visibleClientsForUnit: [ClientConfig] {
+        visibleClients.filter(isShownForCurrentUnit)
+    }
+
     /// Why data for the selected month may be missing, in user terms.
     var dataUnavailableReason: String {
         if let message = lastError {
@@ -656,7 +669,7 @@ final class AppState {
         let month = YearMonth(containing: reference, timeZone: timeZone)
         guard let snapshot = snapshots[month] else { return nil }
         return ProgressCalculator.aggregate(
-            clients: clients,
+            clients: clients.filter(isShownForCurrentUnit),
             entries: snapshot.entries,
             month: month,
             period: displaySettings.aggregationPeriod == .day ? .day : .month,
@@ -860,7 +873,7 @@ final class AppState {
         // arrangement, exactly like the single-month aggregate.
         var ordered: [ClientPeriodSlice] = []
         var byID: [Int: ClientPeriodSlice] = [:]
-        for client in visibleClients {
+        for client in visibleClients where isShownForCurrentUnit(client) {
             guard let byMonth = progressByClientMonth[client.id], !byMonth.isEmpty else { continue }
             let slice = ProgressCalculator.weekSlice(
                 client: client,

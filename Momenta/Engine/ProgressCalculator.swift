@@ -204,10 +204,20 @@ enum ProgressCalculator {
         now: Date
     ) -> ClientProgress? {
         let recordedGoal = client.goal(for: month)
-        let goal: MonthlyGoal? = (recordedGoal?.isComplete == true) ? recordedGoal : nil
-        // No goal for the month: still price actuals with the backfilled
-        // rate; without even a rate there is nothing meaningful to show.
-        guard let rate = goal?.hourlyRate ?? client.effectiveRate(for: month) else { return nil }
+        let goalIsUsable = recordedGoal.map { client.isBillable ? $0.isComplete : $0.hours > 0 } ?? false
+        let goal: MonthlyGoal? = goalIsUsable ? recordedGoal : nil
+        let rate: Decimal
+        if client.isBillable {
+            // No goal for the month: still price actuals with the backfilled
+            // rate; without even a rate there is nothing meaningful to show.
+            guard let resolved = goal?.hourlyRate ?? client.effectiveRate(for: month) else { return nil }
+            rate = resolved
+        } else {
+            // Non-billable clients have no rate. Revenue is a flat zero
+            // everywhere; without a goal there is nothing to plan or show.
+            guard goal != nil else { return nil }
+            rate = 0
+        }
 
         let calendar = YearMonth.calendar(in: timeZone)
         let monthStart = month.start(in: timeZone)
@@ -324,7 +334,8 @@ enum ProgressCalculator {
         var periodTargetHours: Decimal = 0
         var aggregateWeights = [Int](repeating: 0, count: month.dayCount(in: timeZone))
         for client in clients where client.state(for: month) == .configured {
-            guard let goal = client.goal(for: month), goal.isComplete else { continue }
+            guard let goal = client.goal(for: month),
+                  (client.isBillable ? goal.isComplete : goal.hours > 0) else { continue }
             let weights = dailyWeights(month: month, pacing: client.pacing, customWorkDays: client.customWorkDays, timeZone: timeZone)
             for index in weights.indices where weights[index] > 0 {
                 aggregateWeights[index] = 1

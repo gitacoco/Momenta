@@ -187,10 +187,15 @@ struct DashboardView: View {
                     if let uncategorized = appState.uncategorized, uncategorized.noClientHours > 0.05 {
                         uncategorizedBanner(hours: uncategorized.noClientHours)
                     }
+                    // Revenue mode hides non-billable clients; when they are
+                    // all there is, say so instead of showing a blank list.
+                    if appState.visibleClientsForUnit.isEmpty, !appState.visibleClients.isEmpty {
+                        nonBillableOnlyBanner
+                    }
                     // Every enabled client gets a row — data (including
                     // rate-backfilled historical months), a setup prompt, or
                     // an explicit reason why there's nothing to show.
-                    ForEach(appState.visibleClients) { client in
+                    ForEach(appState.visibleClientsForUnit) { client in
                         if let card = cardData(client, period: period, monthProgress: data.progressByClientID, slices: data.sliceByClientID) {
                             ClientCardView(
                                 data: card,
@@ -280,6 +285,31 @@ struct DashboardView: View {
         }
     }
 
+    /// Revenue mode with only non-billable clients: nothing earns money, so
+    /// there are no cards — explain that instead of rendering an empty list.
+    private var nonBillableOnlyBanner: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Image(systemName: "dollarsign.circle")
+                .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("No billable clients")
+                    .font(.callout.weight(.semibold))
+                Text("Your clients track hours only. Switch to hours to see them.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            Button("Show Hours") {
+                appState.displayUnit = .hours
+            }
+        }
+        .padding(10)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(Color.primary.opacity(0.04))
+        )
+    }
+
     /// Shown when the selected month has no snapshot at all: the numbers
     /// aren't just empty, they're absent — say so and offer a retry.
     private var dataUnavailableBanner: some View {
@@ -325,7 +355,7 @@ struct DashboardView: View {
             ClientAvatar(client: client, size: 16)
             Text(client.displayName)
                 .font(.headline)
-            Text("needs a rate and goal")
+            Text(client.isBillable ? "needs a rate and goal" : "needs an hours goal")
                 .font(.callout)
                 .foregroundStyle(.secondary)
             Spacer()

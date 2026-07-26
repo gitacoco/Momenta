@@ -33,11 +33,24 @@ struct GoalEditorSection: View {
     }
 
     private var isDirty: Bool {
-        draft != GoalDraft(goal: client.goal(for: month))
+        draft != GoalDraft(goal: client.goal(for: month), isBillable: client.isBillable)
     }
 
     var body: some View {
         Section {
+            if !client.isBillable {
+                // Non-billable clients have no rate or revenue: a single hours
+                // target, as a standard label-left / field-right row.
+                LabeledContent("Hours") {
+                    TextField("Hours", value: hoursBinding, format: .number.precision(.fractionLength(0...2)))
+                        .textFieldStyle(.plain)
+                        .multilineTextAlignment(.trailing)
+                        .frame(minWidth: 56, idealWidth: 70, maxWidth: 70)
+                        .focused(focus, equals: .hours)
+                        .labelsHidden()
+                        .onSubmit(commitIfDirty)
+                }
+            } else {
             ViewThatFits(in: .horizontal) {
                 HStack(alignment: .bottom, spacing: 12) {
                     converterField(
@@ -86,6 +99,7 @@ struct GoalEditorSection: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
             .padding(.vertical, 2)
+            }
         } header: {
             HStack(alignment: .firstTextBaseline) {
                 VStack(alignment: .leading, spacing: 2) {
@@ -233,6 +247,10 @@ struct GoalHistoryView: View {
     }
 
     private func historyLine(_ goal: MonthlyGoal) -> String {
+        // Non-billable clients have no rate or revenue: hours only.
+        guard client.isBillable else {
+            return Format.hours(goal.hours)
+        }
         let authored = goal.isAuthoredInHours ? "hours-led" : "revenue-led"
         let code = client.currency
         return "\(Format.hours(goal.hours)) · \(Format.currency(goal.revenue, code: code)) @ \(Format.currency(goal.hourlyRate, code: code))/h · \(authored)"

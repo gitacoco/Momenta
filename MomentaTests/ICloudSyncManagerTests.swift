@@ -114,7 +114,7 @@ struct ICloudSyncManagerTests {
     @Test func higherServerSchemaStopsUploadAndRequestsUpdate() async {
         let defaults = freshDefaults()
         let database = FakeCloudSyncDatabase()
-        database.configRecord = cloudRecord(.empty, version: 2)
+        database.configRecord = cloudRecord(.empty, version: 3)
         let manager = ICloudSyncManager(
             account: connectedAccount(defaults: defaults),
             config: ConfigStore(defaults: defaults),
@@ -131,9 +131,56 @@ struct ICloudSyncManagerTests {
         #expect(message.contains("Update Momenta"))
         #expect(database.configSaveCount == 0)
         let preserved = ConfigSyncStateStore(defaults: defaults).load(togglUserID: 1)
-        #expect(preserved.unsupportedRemoteSchemaVersion == 2)
+        #expect(preserved.unsupportedRemoteSchemaVersion == 3)
         #expect(preserved.unsupportedRemotePayloadData == database.configRecord?.payloadData)
         #expect(preserved.unsupportedRemoteSystemFields == database.configRecord?.systemFields)
+    }
+
+    @Test func olderSchemaIsReadAndRewrittenAtTheCurrentVersion() async {
+        // The other half of the schema contract: a newer client accepts every
+        // version at or below its own, and its own uploads carry the current
+        // one. (`higherServerSchemaStopsUploadAndRequestsUpdate` covers the
+        // fail-closed direction.)
+        let defaults = freshDefaults()
+        let config = ConfigStore(defaults: defaults)
+        config.merge(
+            workspaces: [TogglWorkspace(id: 10, name: "Studio")],
+            togglClients: [TogglClientDTO(id: 7, wid: 10, name: "Client", archived: false)]
+        )
+        let database = FakeCloudSyncDatabase()
+        // A payload written before `workWindow` existed. Local is untouched,
+        // so it adopts rather than asking to merge two histories.
+        database.configRecord = cloudRecord(
+            SyncedConfigPayload(clients: [7: syncedClient(7, color: "#FF0000")], order: [7]),
+            version: ConfigSyncLocalState.supportedSchemaVersion - 1
+        )
+        let manager = ICloudSyncManager(
+            account: connectedAccount(defaults: defaults),
+            config: config,
+            database: database,
+            defaults: defaults
+        )
+
+        await manager.handleForeground()
+
+        // Read: accepted and projected, not quarantined.
+        #expect(manager.state == .synced)
+        #expect(config.client(id: 7)?.colorHex == "#FF0000")
+        #expect(
+            ConfigSyncStateStore(defaults: defaults)
+                .load(togglUserID: 1).unsupportedRemoteSchemaVersion == nil
+        )
+
+        // Write: this client's own upload carries the current version.
+        var edited = config.clients[0]
+        edited.colorHex = "#00FF00"
+        config.update(edited)
+        await manager.handleForeground()
+
+        #expect(database.configSaveCount == 1)
+        #expect(
+            database.configRecord?.schemaVersion == ConfigSyncLocalState.supportedSchemaVersion
+        )
     }
 
     @Test func previouslySyncedMissingBaseFailsClosed() async {

@@ -522,6 +522,168 @@ struct ProgressCalculatorTests {
         #expect(slice.targetHours == expected)
     }
 
+    // MARK: Non-billable clients
+
+    @Test func switchingBillingOffParksTheRateForTheWholeRoundTrip() {
+        // The worst case: the current month is the only version carrying a
+        // positive rate, so nothing earlier survives the hours-only edit.
+        var config = client(pacing: .weekdays, goal: MonthlyGoal(hourlyRate: 120, input: .hours(40)))
+        #expect(config.restorableHourlyRate == 120)
+
+        config.setBillable(false, referenceMonth: july)
+        // Editing hours while non-billable saves rate 0 over this month and
+        // every later version, exactly as `ConfigStore.setGoal` does.
+        config.goalHistory[july] = MonthlyGoal(hourlyRate: 0, input: .hours(15))
+
+        // The rate is gone from history…
+        #expect(config.effectiveRate(for: july) == nil)
+        // …but survives for the prefill when billing comes back.
+        #expect(config.restorableHourlyRate == 120)
+
+        // Re-enabling restores the rate into the goal in the same mutation, so
+        // the client is immediately configured again — not billable-but-
+        // rate-less, which nothing afterwards would go back and repair.
+        config.setBillable(true, referenceMonth: july)
+        #expect(config.isBillable)
+        #expect(config.goal(for: july)?.hourlyRate == 120)
+        #expect(config.goal(for: july)?.hours == 15)
+        #expect(config.hasCompleteGoal(for: july))
+        #expect(config.state(for: july) == .configured)
+    }
+
+    @Test func reEnablingBillingRestoresEveryRatelessMonthButKeepsRecordedRates() {
+        let june = YearMonth(year: 2026, month: 6)
+        let august = YearMonth(year: 2026, month: 8)
+        var config = client(goal: nil)
+        config.goalHistory = [
+            june: MonthlyGoal(hourlyRate: 80, input: .hours(30)),
+            july: MonthlyGoal(hourlyRate: 120, input: .hours(40)),
+        ]
+        config.setBillable(false, referenceMonth: july)
+        // The hours-only edit zeroes this month and every later one, exactly
+        // as `ConfigStore.setGoal` forward-fills.
+        config.goalHistory[july] = MonthlyGoal(hourlyRate: 0, input: .hours(15))
+        config.goalHistory[august] = MonthlyGoal(hourlyRate: 0, input: .hours(15))
+
+        config.setBillable(true, referenceMonth: july)
+
+        #expect(config.goal(for: july)?.hourlyRate == 120)
+        #expect(config.goal(for: august)?.hourlyRate == 120)
+        // June carries a rate of its own, so it is left exactly as recorded.
+        #expect(config.goal(for: june)?.hourlyRate == 80)
+    }
+
+    @Test func reEnablingBillingLeavesNoMonthPricedWithoutRecordingARate() {
+        // One flag governs the whole history, and `effectiveRate` backfills a
+        // later rate into any rate-less month — so a month left at rate 0
+        // would render its hours as revenue its stored goal never recorded.
+        let june = YearMonth(year: 2026, month: 6)
+        var config = client(goal: nil)
+        config.goalHistory = [june: MonthlyGoal(hourlyRate: 120, input: .hours(40))]
+        config.setBillable(false, referenceMonth: june)
+        config.goalHistory[june] = MonthlyGoal(hourlyRate: 0, input: .hours(15))
+
+        config.setBillable(true, referenceMonth: july)
+
+        // June is priced at 120 by the display layer either way; now the
+        // stored goal says so too, and counts as configured rather than
+        // sitting in needs-setup while its hours show revenue.
+        #expect(config.goal(for: june)?.hourlyRate == 120)
+        #expect(config.effectiveRate(for: june) == 120)
+        #expect(config.hasCompleteGoal(for: june))
+        #expect(config.state(for: june) == .configured)
+    }
+
+    @Test func reEnablingRestoresAGoalInheritedFromAnEarlierMonth() {
+        // Switched off in June and switched back on in July, with no July
+        // version of its own: July only inherits June's zeroed goal, so there
+        // is no key at or after July for a restore to rewrite.
+        let june = YearMonth(year: 2026, month: 6)
+        var config = client(goal: nil)
+        config.goalHistory = [june: MonthlyGoal(hourlyRate: 120, input: .hours(40))]
+        config.setBillable(false, referenceMonth: june)
+        config.goalHistory[june] = MonthlyGoal(hourlyRate: 0, input: .hours(15))
+        #expect(config.goalHistory[july] == nil)
+
+        config.setBillable(true, referenceMonth: july)
+
+        #expect(config.goal(for: july)?.hourlyRate == 120)
+        #expect(config.goal(for: july)?.hours == 15)
+        #expect(config.hasCompleteGoal(for: july))
+        #expect(config.state(for: july) == .configured)
+    }
+
+    @Test func aBillableClientWithARatelessGoalIsOfferedTheParkedRate() {
+        // The state a crash between the two saves — or a merge that took the
+        // flag from one side and the goal from the other — can leave behind.
+        var config = client(goal: MonthlyGoal(hourlyRate: 0, input: .hours(15)))
+        config.billableFlag = true
+        config.dormantHourlyRate = 120
+
+        #expect(!config.hasCompleteGoal(for: july))
+        // The editor offers the parked rate; the ordinary auto-save stores it
+        // on the next edit, focus change, or when the pane closes.
+        #expect(config.editorHourlyRate(for: july) == 120)
+    }
+
+    @Test func aNonBillableClientIsNeverOfferedARate() {
+        var config = client(goal: MonthlyGoal(hourlyRate: 0, input: .hours(15)))
+        config.billableFlag = false
+        config.dormantHourlyRate = 120
+
+        #expect(config.editorHourlyRate(for: july) == nil)
+    }
+
+    @Test func aClientThatNeverToggledStillOffersItsHistoricRate() {
+        // No parked rate: fall back to the newest positive rate on record.
+        let june = YearMonth(year: 2026, month: 6)
+        var config = client(goal: nil)
+        config.goalHistory = [
+            june: MonthlyGoal(hourlyRate: 90, input: .hours(30)),
+            july: MonthlyGoal(hourlyRate: 110, input: .hours(40)),
+        ]
+        #expect(config.dormantHourlyRate == nil)
+        #expect(config.restorableHourlyRate == 110)
+    }
+
+    @Test func nonBillableClientRendersHoursWithoutARate() {
+        var config = client(pacing: .weekdays, goal: MonthlyGoal(hourlyRate: 0, input: .hours(40)))
+        config.isBillable = false
+        let entries = [
+            TimeEntry(id: 1, clientID: 1, start: date(day: 1, hour: 8), stop: date(day: 1, hour: 12)), // 4h
+        ]
+        // An hours-only goal is complete without a rate.
+        #expect(config.hasCompleteGoal(for: july))
+        #expect(config.state(for: july) == .configured)
+
+        let progress = ProgressCalculator.progress(
+            for: config, entries: entries, month: july, timeZone: utc, now: date(day: 2, hour: 9)
+        )
+        #expect(progress != nil)
+        #expect(progress?.hourlyRate == 0)
+        #expect(progress?.actualHours == 4)
+        // Revenue is a flat zero, but the hours goal line is present.
+        #expect(progress?.actualRevenue == 0)
+        #expect(progress?.plannedHoursToDate != nil)
+    }
+
+    @Test func nonBillableClientCountsInHoursAggregateWithZeroRevenue() {
+        var config = client(pacing: .calendarDays, goal: MonthlyGoal(hourlyRate: 0, input: .hours(31)))
+        config.isBillable = false
+        let entries = [
+            TimeEntry(id: 1, clientID: 1, start: date(day: 1, hour: 8), stop: date(day: 1, hour: 10)), // 2h
+        ]
+        let aggregate = ProgressCalculator.aggregate(
+            clients: [config], entries: entries, month: july,
+            period: .month, timeZone: utc, now: date(day: 15)
+        )
+        #expect(aggregate.shares.count == 1)
+        #expect(aggregate.actualHours == 2)
+        #expect(aggregate.targetHours == 31)
+        // No rate, so the revenue track is a flat zero.
+        #expect(aggregate.targetRevenue == 0)
+    }
+
     @Test func daySliceOnRestDayHasNoTargetOrDebt() {
         let goal = MonthlyGoal(hourlyRate: 100, input: .hours(50))
         var config = client(pacing: .custom, goal: goal)

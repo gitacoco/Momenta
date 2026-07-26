@@ -235,7 +235,7 @@ struct ClientDetailColumn: View {
                 ContentUnavailableView {
                     Label("Select a Client", systemImage: "person.crop.rectangle")
                 } description: {
-                    Text("Pick a client to configure its profile, rate, and goal.")
+                    Text("Pick a client to configure its profile and goal.")
                 }
             }
         }
@@ -261,7 +261,17 @@ private struct ClientDetailView: View {
         self.client = client
         self.showsWorkspace = showsWorkspace
         let month = YearMonth(containing: Date(), timeZone: .current)
-        _draft = State(initialValue: GoalDraft(goal: client.goal(for: month)))
+        _draft = State(initialValue: Self.makeDraft(for: client, month: month))
+    }
+
+    /// The editor's starting state, including the rate a half-finished
+    /// re-enable left out of the goal (see `editorHourlyRate`).
+    private static func makeDraft(for client: ClientConfig, month: YearMonth) -> GoalDraft {
+        var draft = GoalDraft(goal: client.goal(for: month), isBillable: client.isBillable)
+        if (draft.hourlyRate ?? 0) <= 0, let rate = client.editorHourlyRate(for: month) {
+            draft.setRate(rate)
+        }
+        return draft
     }
 
     private static let currencyCodes = [
@@ -295,25 +305,31 @@ private struct ClientDetailView: View {
                 if showsWorkspace {
                     LabeledContent("Workspace", value: client.workspaceName)
                 }
-                centeredControlRow("Hourly rate") {
-                    HStack(spacing: 6) {
-                        TextField("Rate", value: rateBinding, format: .number)
-                            .textFieldStyle(.plain)
-                            .multilineTextAlignment(.trailing)
-                            .frame(minWidth: 56, idealWidth: 70, maxWidth: 70)
-                            .focused($focusedField, equals: .rate)
-                            .labelsHidden()
-                        Picker("Currency", selection: currencyBinding) {
-                            ForEach(currencyOptions, id: \.self) { code in
-                                Text(code).tag(code)
-                            }
-                        }
+                centeredControlRow("Billable") {
+                    Toggle("Billable", isOn: billableBinding)
+                        .toggleStyle(.switch)
+                        .controlSize(.mini)
                         .labelsHidden()
+                }
+                if isBillable {
+                    centeredControlRow("Hourly rate") {
+                        HStack(spacing: 6) {
+                            TextField("Rate", value: rateBinding, format: .number)
+                                .textFieldStyle(.plain)
+                                .multilineTextAlignment(.trailing)
+                                .frame(minWidth: 56, idealWidth: 70, maxWidth: 70)
+                                .focused($focusedField, equals: .rate)
+                                .labelsHidden()
+                            Picker("Currency", selection: currencyBinding) {
+                                ForEach(currencyOptions, id: \.self) { code in
+                                    Text(code).tag(code)
+                                }
+                            }
+                            .labelsHidden()
+                        }
                     }
                 }
             }
-
-            pacingSection
 
             if client.isArchivedInToggl {
                 Section {
@@ -326,6 +342,9 @@ private struct ClientDetailView: View {
             } else {
                 GoalEditorSection(client: client, draft: $draft, focus: $focusedField)
             }
+
+            pacingSection
+
             GoalHistoryView(client: client)
         }
         .formStyle(.grouped)
@@ -348,6 +367,21 @@ private struct ClientDetailView: View {
             Text(logoImportError ?? "The selected image could not be imported.")
         }
         .disabled(client.isArchivedInToggl)
+        // The draft carries its billability so it can save hours-only goals;
+        // rebuild it when the toggle flips so the editor and its saves follow.
+        // `setBillable` already restored the rate into the goal, so this only
+        // has to follow the model — including the parked rate it surfaces.
+        .onChange(of: isBillable) { _, _ in
+            draft = Self.makeDraft(for: liveClient, month: appState.currentMonth)
+        }
+    }
+
+    private var liveClient: ClientConfig {
+        appState.config.client(id: client.id) ?? client
+    }
+
+    private var isBillable: Bool {
+        liveClient.isBillable
     }
 
     // MARK: Logo
@@ -414,7 +448,7 @@ private struct ClientDetailView: View {
     // MARK: Needs setup (itemized, click-to-focus)
 
     private var missingRate: Bool {
-        (draft.hourlyRate ?? 0) <= 0
+        isBillable && (draft.hourlyRate ?? 0) <= 0
     }
 
     private var missingGoal: Bool {
@@ -439,7 +473,12 @@ private struct ClientDetailView: View {
                         setupItem("Set an hourly rate", target: .rate)
                     }
                     if missingGoal {
-                        setupItem("Enter a monthly goal in hours or revenue", target: .hours)
+                        setupItem(
+                            isBillable
+                                ? "Enter a monthly goal in hours or revenue"
+                                : "Enter a monthly goal in hours",
+                            target: .hours
+                        )
                     }
                 }
                 .padding(.leading, 24)
@@ -655,6 +694,18 @@ private struct ClientDetailView: View {
 
     private var rateBinding: Binding<Decimal?> {
         Binding { draft.hourlyRate } set: { draft.setRate($0) }
+    }
+
+    private var billableBinding: Binding<Bool> {
+        Binding {
+            appState.config.client(id: client.id)?.isBillable ?? true
+        } set: { newValue in
+            guard var updated = appState.config.client(id: client.id) else { return }
+            // Not a plain `isBillable` assignment: switching off is the last
+            // moment the rate can still be read out of the goal history.
+            updated.setBillable(newValue, referenceMonth: appState.currentMonth)
+            appState.config.update(updated)
+        }
     }
 }
 
