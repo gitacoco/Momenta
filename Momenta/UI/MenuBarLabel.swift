@@ -33,6 +33,11 @@ struct MenuBarPresentation: Equatable, Sendable {
     var period: AggregationPeriod
     var aggregation: ProgressObject?
     var clients: [ProgressObject]
+    /// Accessibility descriptions for every client the mode covers, including
+    /// those whose ring is visually omitted because nothing is planned this
+    /// period: sight loses nothing by dropping an empty ring, but VoiceOver
+    /// must not conflate a planned day off with missing data.
+    var clientAccessibilityDescriptions: [String]
     var overallPercentageText: String?
 
     init(aggregate: AggregateProgress?, settings: DisplaySettings, unit: DisplayUnit) {
@@ -44,7 +49,19 @@ struct MenuBarPresentation: Equatable, Sendable {
         guard let aggregate, !aggregate.shares.isEmpty else {
             aggregation = nil
             clients = []
+            clientAccessibilityDescriptions = []
             return
+        }
+
+        // Follow the display unit: a non-billable client has no revenue, so
+        // its revenue ring would read a meaningless 100%.
+        func fraction(for share: AggregateProgress.ClientShare) -> Double? {
+            switch unit {
+            case .revenue:
+                share.targetIsAvailable ? share.fraction : nil
+            case .hours:
+                share.hoursTargetIsAvailable ? share.hoursFraction : nil
+            }
         }
 
         let aggregateFraction: Double? = switch unit {
@@ -59,15 +76,12 @@ struct MenuBarPresentation: Equatable, Sendable {
             monogram: nil,
             fraction: aggregateFraction
         )
-        let clientObjects = aggregate.shares.map { share in
-            // Follow the display unit: a non-billable client has no revenue,
-            // so its revenue ring would read a meaningless 100%.
-            let clientFraction: Double? = switch unit {
-            case .revenue:
-                share.targetIsAvailable ? share.fraction : nil
-            case .hours:
-                share.hoursTargetIsAvailable ? share.hoursFraction : nil
-            }
+        let clientObjects = aggregate.shares.compactMap { share -> ProgressObject? in
+            // No target for this period — a scheduled day off. Its ring would
+            // draw an empty track, pixel-identical to 0% done, reading as debt
+            // on a day that plans none. Omit it, as Overall already does.
+            guard let clientFraction = fraction(for: share) else { return nil }
+
             let name = share.client.displayName
             let firstCharacter = name
                 .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -80,17 +94,29 @@ struct MenuBarPresentation: Equatable, Sendable {
                 fraction: clientFraction
             )
         }
+        // Only day means "off today"; a targetless month/week is a goal that
+        // simply doesn't exist in this unit.
+        let restingLabel = period == .day ? "day off" : "no goal"
+        let clientDescriptions = aggregate.shares.map { share in
+            if let clientFraction = fraction(for: share) {
+                return "\(share.client.displayName) \(Format.percent(clientFraction))"
+            }
+            return "\(share.client.displayName), \(restingLabel)"
+        }
 
         switch objectMode {
         case .aggregation:
             aggregation = aggregateObject
             clients = []
+            clientAccessibilityDescriptions = []
         case .split:
             aggregation = nil
             clients = clientObjects
+            clientAccessibilityDescriptions = clientDescriptions
         case .both:
             aggregation = aggregateObject
             clients = clientObjects
+            clientAccessibilityDescriptions = clientDescriptions
         }
 
         if settings.showsOverallPercentage,
@@ -105,11 +131,12 @@ struct MenuBarPresentation: Equatable, Sendable {
     }
 
     var accessibilityValue: String {
-        let objects = [aggregation].compactMap { $0 } + clients
-        guard !objects.isEmpty else {
+        var parts = [aggregation?.accessibilityDescription].compactMap { $0 }
+        parts += clientAccessibilityDescriptions
+        guard !parts.isEmpty else {
             return "\(period.accessibilityLabel), progress unavailable"
         }
-        return ([period.accessibilityLabel] + objects.map(\.accessibilityDescription))
+        return ([period.accessibilityLabel] + parts)
             .joined(separator: ", ")
     }
 }

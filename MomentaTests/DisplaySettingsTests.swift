@@ -247,7 +247,44 @@ struct MenuBarPresentationTests {
         #expect(combinationCount == 18)
     }
 
-    @Test func rawFractionsRemainTruthfulAndZeroTargetsAreUnavailable() {
+    @Test func clientsOffTodayDrawNoRing() {
+        let progress = AggregateProgress(shares: [
+            // Off today: no target in either unit.
+            .init(
+                client: client(id: 1, name: "Cornerstone"),
+                actualRevenue: 0,
+                targetRevenue: 0,
+                actualHours: 0,
+                targetHours: 0,
+                targetIsAvailable: false,
+                hoursTargetIsAvailable: false
+            ),
+            // Scheduled today, nothing logged yet.
+            .init(
+                client: client(id: 2, name: "Self-career"),
+                actualRevenue: 0,
+                targetRevenue: 0,
+                actualHours: 0,
+                targetHours: 2,
+                targetIsAvailable: false,
+                hoursTargetIsAvailable: true
+            ),
+        ])
+        var settings = DisplaySettings()
+        settings.menuBarObjectMode = .split
+        settings.aggregationPeriod = .day
+
+        let presentation = MenuBarPresentation(aggregate: progress, settings: settings, unit: .hours)
+
+        #expect(presentation.clients.map(\.name) == ["Self-career"])
+        #expect(presentation.clients[0].fraction == 0)
+        // The ring disappears, the client doesn't: VoiceOver still announces
+        // it, as a planned day off rather than missing data.
+        #expect(presentation.accessibilityValue.contains("Cornerstone, day off"))
+        #expect(presentation.accessibilityValue.contains("Self-career 0%"))
+    }
+
+    @Test func rawFractionsRemainTruthfulAndTargetlessClientsAreOmitted() {
         let progress = AggregateProgress(shares: [
             .init(
                 client: client(id: 1, name: "Cornerstone"),
@@ -266,10 +303,13 @@ struct MenuBarPresentationTests {
         let presentation = MenuBarPresentation(aggregate: progress, settings: settings, unit: .revenue)
 
         #expect(presentation.aggregation?.fraction == 1.75)
+        // Over-100% stays truthful; the client with no target draws no ring
+        // rather than an empty one indistinguishable from 0% — but VoiceOver
+        // still announces it.
+        #expect(presentation.clients.map(\.name) == ["Cornerstone"])
         #expect(presentation.clients[0].fraction == 1.5)
-        #expect(presentation.clients[1].fraction == nil)
         #expect(presentation.accessibilityValue.contains("150%"))
-        #expect(presentation.accessibilityValue.contains("no goal"))
+        #expect(presentation.accessibilityValue.contains("Providence, no goal"))
     }
 
     @Test func overallPercentageOnlyAppearsWhenEnabledAndVisible() {
