@@ -936,7 +936,6 @@ final class AppState {
             ))
         case .day:
             let monthProgress = monthProgressByID()
-            let isCurrent = isReferenceCurrentDay
             // The same clock the month progress used, so the timeline's tip
             // and the day totals agree (no local ticking between syncs).
             let entries = selectedSnapshot?.entries ?? []
@@ -946,7 +945,6 @@ final class AppState {
                     progress: progress,
                     entries: entries,
                     reference: activeReference,
-                    isCurrentDay: isCurrent,
                     timeZone: timeZone,
                     now: entriesNow
                 )

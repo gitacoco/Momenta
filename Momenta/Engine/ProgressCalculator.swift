@@ -171,11 +171,18 @@ struct ClientPeriodSlice: Identifiable, Sendable {
     var actualHours: Decimal
     var actualRevenue: Decimal
 
-    /// Period target — day: catch-up pace; week: the catch-up target frozen at
-    /// the start of each month segment in the week; month: the whole-month
-    /// goal. Nil without a goal.
+    /// Period target — day: today's goal, frozen at the day's start; week: the
+    /// catch-up target frozen at the start of each month segment in the week;
+    /// month: the whole-month goal. Nil without a goal.
     var targetHours: Decimal?
     var targetRevenue: Decimal?
+
+    /// The live catch-up pace behind the week card's "/day to goal", identical
+    /// to the month card's: average hours per remaining scheduled day needed
+    /// to hit the month's goal, falling as work is logged. Nil without a goal,
+    /// and unused by day — today's goal is frozen at the day's start instead,
+    /// so it cannot retreat from the work being logged against it.
+    var requiredDailyHours: Decimal? = nil
 
     /// Planned value through the reference point, for the behind/ahead delta.
     /// Day reuses the target (the bullet compares actual against the day pace).
@@ -377,28 +384,26 @@ enum ProgressCalculator {
             }
             // Actual revenue from entries starting inside the period.
             var hours: Decimal = 0
-            var monthHours: Decimal = 0
             var beforeDayHours: Decimal = 0
             for entry in entries where entry.clientID == client.id {
                 let entryHours = Decimal(entry.elapsed(asOf: now)) / 3600
                 if entry.start >= interval.start && entry.start < interval.end {
                     hours += entryHours
                 }
-                if period == .day, month.contains(entry.start, in: timeZone) {
-                    monthHours += entryHours
-                    if entry.start < interval.start {
-                        beforeDayHours += entryHours
-                    }
+                if period == .day,
+                   month.contains(entry.start, in: timeZone),
+                   entry.start < interval.start {
+                    beforeDayHours += entryHours
                 }
             }
             totalGoalRevenue += goal.revenue
             actualRevenueBeforeDay += beforeDayHours * goal.hourlyRate
             periodActualHours += hours
 
-            // Today's ring uses the same dynamic catch-up pace shown on the
-            // client card. Week and month retain their calendar-slice plans.
-            // Revenue stays exact (from goal.revenue) rather than re-derived
-            // from hours × rate, which could drift for revenue-authored goals.
+            // Today's ring uses the same frozen day goal shown on the client
+            // card. Week and month retain their calendar-slice plans. Revenue
+            // stays exact (from goal.revenue) rather than re-derived from
+            // hours × rate, which could drift for revenue-authored goals.
             let targetHours: Decimal
             let target: Decimal
             let targetIsAvailable: Bool
@@ -410,25 +415,12 @@ enum ProgressCalculator {
                 let workWeekdays = client.pacing.workWeekdays(custom: client.customWorkDays)
                 let scheduledToday = workWeekdays.contains(calendar.component(.weekday, from: interval.start))
                 if scheduledToday {
-                    // The card/ring show the live pace (falls as work is logged
-                    // today); the Overall below sums the frozen pace instead.
+                    // Today's goal, frozen at the reference day's start: only
+                    // work banked before the day moves it, so logging today
+                    // can never lower its own denominator (and a back-stepped
+                    // day shows the goal it actually had). The day slice and
+                    // the pooled revenue target below freeze identically.
                     targetHours = requiredDailyHours(
-                        goal: goal,
-                        actualHours: monthHours,
-                        month: month,
-                        pacing: client.pacing,
-                        customWorkDays: client.customWorkDays,
-                        timeZone: timeZone,
-                        now: now
-                    )
-                    target = targetHours * goal.hourlyRate
-                    targetIsAvailable = true
-                    hoursAvailable = true
-                    scheduledActualHoursToday += hours
-                    // Freeze the denominator at the reference day (not the live
-                    // clock) so a back-stepped day shows the pace it had then,
-                    // matching the day slice and the pooled revenue target.
-                    scheduledHoursTargetToday += requiredDailyHours(
                         goal: goal,
                         actualHours: beforeDayHours,
                         month: month,
@@ -437,6 +429,11 @@ enum ProgressCalculator {
                         timeZone: timeZone,
                         now: interval.start
                     )
+                    target = targetHours * goal.hourlyRate
+                    targetIsAvailable = true
+                    hoursAvailable = true
+                    scheduledActualHoursToday += hours
+                    scheduledHoursTargetToday += targetHours
                 } else {
                     targetHours = 0
                     target = 0
@@ -527,16 +524,14 @@ enum ProgressCalculator {
 
     // MARK: Popover period slices
 
-    /// The day slice: the reference day's own hours against the catch-up pace.
-    /// The current day uses the live pace (matching the client card and menu
-    /// bar); a past day freezes the pace at that day's start. `points` carries
-    /// the intraday cumulative series for the timeline style; the bullet
-    /// ignores it.
+    /// The day slice: the reference day's own hours against today's goal, the
+    /// catch-up pace computed once at the day's start and held there for the
+    /// rest of the day. `points` carries the intraday cumulative series for the
+    /// timeline style; the bullet ignores it.
     static func daySlice(
         progress: ClientProgress,
         entries: [TimeEntry],
         reference: Date,
-        isCurrentDay: Bool,
         timeZone: TimeZone,
         now: Date
     ) -> ClientPeriodSlice {
@@ -561,10 +556,14 @@ enum ProgressCalculator {
         let isScheduledDay = workWeekdays.contains(calendar.component(.weekday, from: refDayStart))
         let isRestDay = progress.goal != nil && !isScheduledDay
 
-        // The pace frozen at the day's start: what this day asked for before
-        // any of its own work was logged. The timeline's plan ramp targets
-        // this, so the plan line holds still while the actual line climbs.
-        let dayStartTarget: Decimal? = isRestDay ? nil : progress.goal.map { goal in
+        // Today's goal: the catch-up pace measured once, at the day's start,
+        // from the work banked before it. Yesterday's shortfall raises it and
+        // yesterday's surplus lowers it, but today's own hours never do —
+        // a target that retreats as you log against it can be "met" without
+        // the day's work being done, and gives the plan line nothing stable
+        // to draw. The live, still-falling pace remains the month card's
+        // "/day to goal".
+        let target: Decimal? = isRestDay ? nil : progress.goal.map { goal in
             requiredDailyHours(
                 goal: goal,
                 actualHours: cumulativeBefore,
@@ -576,18 +575,11 @@ enum ProgressCalculator {
             )
         }
 
-        let target: Decimal? = isRestDay ? nil : progress.goal.map { goal in
-            if isCurrentDay {
-                return progress.requiredDailyHours ?? goal.hours
-            }
-            return dayStartTarget ?? goal.hours
-        }
-
         let points = dayTimelinePoints(
             client: progress.client,
             entries: entries,
             dayStart: refDayStart,
-            rampTargetHours: dayStartTarget,
+            rampTargetHours: target,
             rate: rate,
             attributedTotalHours: actual,
             calendar: calendar,
@@ -792,6 +784,11 @@ enum ProgressCalculator {
             ))
         }
 
+        // "/day to goal" names one month's goal, so a week straddling two
+        // months takes the pace of the month its reference sits in.
+        let referenceMonth = YearMonth(containing: reference, timeZone: timeZone)
+        let requiredDaily = progressByMonth[referenceMonth]?.requiredDailyHours
+
         return ClientPeriodSlice(
             client: client,
             period: .week,
@@ -802,6 +799,7 @@ enum ProgressCalculator {
             actualRevenue: actualToDateRevenue,
             targetHours: hasGoal ? (cumulativePlannedHours ?? 0) : nil,
             targetRevenue: hasGoal ? (cumulativePlannedRevenue ?? 0) : nil,
+            requiredDailyHours: hasGoal ? requiredDaily : nil,
             plannedToDateHours: plannedToDateHours,
             plannedToDateRevenue: plannedToDateRevenue
         )

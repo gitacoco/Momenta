@@ -883,13 +883,21 @@ struct ClientCardView: View {
         }
     }
 
-    // MARK: Metrics — month
+    // MARK: Metrics — month + week
 
-    private func monthMetrics(_ progress: ClientProgress) -> some View {
+    /// The "X/day to goal" line both the month and week cards lead with: the
+    /// live catch-up pace, falling as work is logged, opposite the period's
+    /// behind/ahead badge. Day deliberately does not use it — today's goal is
+    /// frozen at the day's start so it cannot retreat as you work.
+    private func paceMetrics(
+        requiredDailyHours: Decimal?,
+        rate: Decimal,
+        delta: String?
+    ) -> some View {
         HStack(alignment: .firstTextBaseline) {
-            if let pace = paceValue(progress) {
+            if let requiredDailyHours {
                 HStack(alignment: .firstTextBaseline, spacing: 2) {
-                    Text(pace)
+                    Text(unitText(hours: requiredDailyHours, revenue: requiredDailyHours * rate))
                         .font(.title3.weight(.semibold).monospacedDigit())
                     Text("/day to goal")
                         .font(.callout)
@@ -897,16 +905,16 @@ struct ClientCardView: View {
                 }
             }
             Spacer()
-            deltaBadge(monthDeltaText(progress))
+            deltaBadge(delta)
         }
     }
 
-    private func paceValue(_ progress: ClientProgress) -> String? {
-        guard let requiredDaily = progress.requiredDailyHours else { return nil }
-        switch unit {
-        case .revenue: return Format.currency(requiredDaily * progress.hourlyRate, code: currencyCode)
-        case .hours: return Format.hours(requiredDaily)
-        }
+    private func monthMetrics(_ progress: ClientProgress) -> some View {
+        paceMetrics(
+            requiredDailyHours: progress.requiredDailyHours,
+            rate: progress.hourlyRate,
+            delta: monthDeltaText(progress)
+        )
     }
 
     private func monthDeltaText(_ progress: ClientProgress) -> String? {
@@ -919,20 +927,15 @@ struct ClientCardView: View {
 
     // MARK: Metrics — week
 
+    /// The week reads like the month: the same live pace toward the same
+    /// monthly goal. The week's own actual and planned totals already show on
+    /// the chart marker and the goal chip.
     private func weekMetrics(_ slice: ClientPeriodSlice) -> some View {
-        HStack(alignment: .firstTextBaseline) {
-            HStack(alignment: .firstTextBaseline, spacing: 4) {
-                Text(unitText(hours: slice.actualHours, revenue: slice.actualRevenue))
-                    .font(.title3.weight(.semibold).monospacedDigit())
-                if let target = slice.targetHours, let targetRevenue = slice.targetRevenue {
-                    Text("of \(unitText(hours: target, revenue: targetRevenue)) planned")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                }
-            }
-            Spacer()
-            deltaBadge(sliceDeltaText(slice))
-        }
+        paceMetrics(
+            requiredDailyHours: slice.requiredDailyHours,
+            rate: slice.hourlyRate,
+            delta: sliceDeltaText(slice)
+        )
     }
 
     /// Behind/ahead delta text for any period slice (week and day). Day reuses

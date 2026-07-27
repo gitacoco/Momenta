@@ -104,9 +104,15 @@ counts toward the same total, so overperformance for one client can offset
 another. Reaching 100% on every scheduled day therefore keeps the combined
 monthly revenue goal on track.
 
-Each client ring remains independent and uses the same live denominator shown
-as **/day to goal** on its client card. Week and Month modes continue to use
-the planned share of the monthly goal for their selected calendar slice.
+Each client ring remains independent and uses that client's own goal for today,
+frozen the same way: its remaining monthly hours at the start of the day divided
+by its remaining scheduled days. Because today's own work never enters that
+denominator, the target holds still all day — yesterday's shortfall raises it and
+yesterday's surplus lowers it, but logging against it never moves it, and the day
+completes only when the work is actually done. Week and Month modes continue to
+use the planned share of the monthly goal for their selected calendar slice, and
+both cards lead with **/day to goal**: the live catch-up pace, which does fall as
+work is logged.
 
 ### Pacing
 
