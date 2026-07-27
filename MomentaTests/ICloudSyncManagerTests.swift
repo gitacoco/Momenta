@@ -114,7 +114,10 @@ struct ICloudSyncManagerTests {
     @Test func higherServerSchemaStopsUploadAndRequestsUpdate() async {
         let defaults = freshDefaults()
         let database = FakeCloudSyncDatabase()
-        database.configRecord = cloudRecord(.empty, version: 3)
+        database.configRecord = cloudRecord(
+            .empty,
+            version: ConfigSyncLocalState.supportedSchemaVersion + 1
+        )
         let manager = ICloudSyncManager(
             account: connectedAccount(defaults: defaults),
             config: ConfigStore(defaults: defaults),
@@ -131,7 +134,10 @@ struct ICloudSyncManagerTests {
         #expect(message.contains("Update Momenta"))
         #expect(database.configSaveCount == 0)
         let preserved = ConfigSyncStateStore(defaults: defaults).load(togglUserID: 1)
-        #expect(preserved.unsupportedRemoteSchemaVersion == 3)
+        #expect(
+            preserved.unsupportedRemoteSchemaVersion
+                == ConfigSyncLocalState.supportedSchemaVersion + 1
+        )
         #expect(preserved.unsupportedRemotePayloadData == database.configRecord?.payloadData)
         #expect(preserved.unsupportedRemoteSystemFields == database.configRecord?.systemFields)
     }

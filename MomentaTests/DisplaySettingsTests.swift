@@ -119,6 +119,24 @@ struct DisplaySettingsTests {
         #expect(settings.refreshMode == .manual)
     }
 
+    @Test func dayViewStyleRoundTripsAndDefaultsToCapsule() throws {
+        var settings = DisplaySettings()
+        settings.dayViewStyle = .timeline
+
+        let data = try JSONEncoder().encode(settings)
+        let decoded = try JSONDecoder().decode(DisplaySettings.self, from: data)
+        #expect(decoded.dayViewStyle == .timeline)
+
+        // Settings persisted before the field existed keep working and land
+        // on the capsule (the pre-timeline behavior).
+        let legacy = try JSONDecoder().decode(
+            DisplaySettings.self,
+            from: Data(#"{"aggregationPeriod": "day"}"#.utf8)
+        )
+        #expect(legacy.dayViewStyle == .capsule)
+        #expect(legacy.aggregationPeriod == .day)
+    }
+
     @Test func refreshModeAndIntervalRoundTrip() throws {
         var settings = DisplaySettings()
         settings.refreshMode = .interval

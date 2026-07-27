@@ -25,6 +25,29 @@ enum PacingMode: String, Codable, CaseIterable, Sendable {
     }
 }
 
+/// The hours of the day a client's work is planned in, as minutes from local
+/// midnight. The day timeline draws its plan ramp inside this window: flat at
+/// zero before it, rising through it, flat at the day's target after it — so a
+/// morning before work starts carries no planned progress, the same principle
+/// that keeps days off from creating artificial debt.
+struct WorkWindow: Hashable, Codable, Sendable {
+    var startMinute: Int
+    var endMinute: Int
+
+    static let `default` = WorkWindow(startMinute: 9 * 60, endMinute: 18 * 60)
+
+    /// The planned fraction of the day's target at `minute`, ramping linearly
+    /// across the window. A degenerate window (end at or before start) steps
+    /// from 0 to 1 at the start so the plan stays monotone.
+    func plannedFraction(atMinute minute: Double) -> Double {
+        guard Double(endMinute) > Double(startMinute) else {
+            return minute >= Double(startMinute) ? 1 : 0
+        }
+        let fraction = (minute - Double(startMinute)) / Double(endMinute - startMinute)
+        return min(max(fraction, 0), 1)
+    }
+}
+
 /// The billing-rate rules, shared by the model's toggle and the sync layer.
 ///
 /// Billing is one flag over a client's whole history, so a billable client
@@ -114,6 +137,10 @@ struct ClientConfig: Identifiable, Hashable, Codable, Sendable {
     /// cross-client aggregation still sums raw numbers. Optional so configs
     /// persisted before this field decode cleanly.
     var currencyCode: String? = nil
+    /// The client's planned work hours within a day, used by the day timeline's
+    /// plan ramp. Optional so configs persisted before this field decode
+    /// cleanly; nil falls back to `WorkWindow.default`.
+    var workWindow: WorkWindow? = nil
     /// File name of an uploaded logo in the local logo store; nil falls back
     /// to the brand-color dot.
     var logoFileName: String? = nil
@@ -184,6 +211,11 @@ struct ClientConfig: Identifiable, Hashable, Codable, Sendable {
     /// selection applied when active.
     var workWeekdays: Set<Int> {
         pacing.workWeekdays(custom: customWorkDays)
+    }
+
+    /// The work window in effect, with the shared default applied.
+    var effectiveWorkWindow: WorkWindow {
+        workWindow ?? .default
     }
 
     /// The goal version in effect for the given month: the exact recorded

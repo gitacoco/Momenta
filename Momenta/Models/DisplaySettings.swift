@@ -81,6 +81,23 @@ enum RefreshMode: String, Codable, CaseIterable, Identifiable, Sendable {
     }
 }
 
+/// How the day period renders each client card: the bullet capsule comparing
+/// today's hours against the day pace, or a cumulative intraday timeline whose
+/// plan ramps only inside the client's work window.
+enum DayViewStyle: String, Codable, CaseIterable, Identifiable, Sendable {
+    case capsule
+    case timeline
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .capsule: return "Capsule"
+        case .timeline: return "Timeline"
+        }
+    }
+}
+
 /// Chart/metric unit toggle. View state only, never persisted.
 enum DisplayUnit: String, CaseIterable, Identifiable, Sendable {
     case revenue
@@ -98,6 +115,8 @@ enum DisplayUnit: String, CaseIterable, Identifiable, Sendable {
 
 struct DisplaySettings: Hashable, Codable, Sendable {
     var aggregationPeriod: AggregationPeriod = .month
+    /// How the popover's day period draws client progress. See `DayViewStyle`.
+    var dayViewStyle: DayViewStyle = .capsule
     var menuBarObjectMode: MenuBarObjectMode = .aggregation
     var menuBarVisualization: MenuBarVisualization = .ring
     var showsOverallPercentage: Bool = false
@@ -122,6 +141,7 @@ struct DisplaySettings: Hashable, Codable, Sendable {
 
     private enum CodingKeys: String, CodingKey {
         case aggregationPeriod
+        case dayViewStyle
         case menuBarObjectMode
         case menuBarVisualization
         case showsOverallPercentage
@@ -140,6 +160,8 @@ struct DisplaySettings: Hashable, Codable, Sendable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         aggregationPeriod =
             (try? container.decode(AggregationPeriod.self, forKey: .aggregationPeriod)) ?? .month
+        dayViewStyle =
+            (try? container.decode(DayViewStyle.self, forKey: .dayViewStyle)) ?? .capsule
 
         let legacySplit =
             (try? container.decode(Bool.self, forKey: .perClientSplit)) ?? false
@@ -172,6 +194,7 @@ struct DisplaySettings: Hashable, Codable, Sendable {
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(aggregationPeriod, forKey: .aggregationPeriod)
+        try container.encode(dayViewStyle, forKey: .dayViewStyle)
         try container.encode(menuBarObjectMode, forKey: .menuBarObjectMode)
         try container.encode(menuBarVisualization, forKey: .menuBarVisualization)
         try container.encode(showsOverallPercentage, forKey: .showsOverallPercentage)

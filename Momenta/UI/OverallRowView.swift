@@ -9,6 +9,10 @@ struct OverallRowView: View {
     var unit: DisplayUnit
     var selectedPeriod: AggregationPeriod
     var onSelectPeriod: (AggregationPeriod) -> Void
+    /// The day card style, toggled here because the choice scopes to the day
+    /// period the row is already switching. Only rendered while day is active.
+    var dayStyle: DayViewStyle
+    var onSelectDayStyle: (DayViewStyle) -> Void
 
     private var periodSelection: Binding<AggregationPeriod> {
         Binding(
@@ -52,6 +56,12 @@ struct OverallRowView: View {
 
                 OverallPeriodCycleButton(selection: periodSelection)
                     .fixedSize()
+
+                if selectedPeriod == .day {
+                    DayStyleToggle(selection: dayStyle, onSelect: onSelectDayStyle)
+                        .fixedSize()
+                        .padding(.leading, 2)
+                }
             }
             .foregroundStyle(.secondary)
             .font(.caption.weight(.semibold))
@@ -129,6 +139,49 @@ private struct OverallPeriodCycleButton: View {
         .accessibilityLabel("Overall period")
         .accessibilityValue(selection.overallPickerLabel)
         .accessibilityHint("Cycles the summary period")
+    }
+}
+
+/// The capsule/timeline switch for the day cards: two icon segments built
+/// from plain Buttons, matching the cycle button's inline language. Like it,
+/// deliberately not a native menu or `Picker(.menu)` (BON-48); a segmented
+/// `Picker` would also read too heavy at this row's caption scale.
+private struct DayStyleToggle: View {
+    var selection: DayViewStyle
+    var onSelect: (DayViewStyle) -> Void
+
+    var body: some View {
+        HStack(spacing: 2) {
+            segment(.timeline, icon: "chart.xyaxis.line", help: "Timeline: the day as a growing curve")
+            segment(.capsule, icon: "capsule", help: "Capsule: today against the day pace")
+        }
+        .padding(2)
+        .background(
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .fill(Color.primary.opacity(0.06))
+        )
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Day card style")
+    }
+
+    private func segment(_ style: DayViewStyle, icon: String, help: LocalizedStringKey) -> some View {
+        Button {
+            onSelect(style)
+        } label: {
+            Image(systemName: icon)
+                .imageScale(.small)
+                .foregroundStyle(selection == style ? Color.primary : Color.secondary)
+                .frame(width: 22, height: 16)
+                .background(
+                    RoundedRectangle(cornerRadius: 4, style: .continuous)
+                        .fill(selection == style ? Color.primary.opacity(0.12) : Color.clear)
+                )
+                .contentShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .help(help)
+        .accessibilityLabel(style.label)
+        .accessibilityAddTraits(selection == style ? [.isSelected] : [])
     }
 }
 

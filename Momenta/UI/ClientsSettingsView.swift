@@ -529,14 +529,67 @@ private struct ClientDetailView: View {
                         .padding(.bottom, 14)
                 }
 
+                workHoursRow
+                    .padding(.bottom, 14)
+
                 Divider()
 
                 Text(pacingCaption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.top, 12)
+
+                Text("Work hours shape the day timeline: its plan line rises only between these times, so mornings before work carry no planned progress.")
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, 6)
             }
             .padding(.vertical, 4)
+        }
+    }
+
+    // MARK: Work hours
+
+    /// Hour/minute pickers only — the date part is pinned to a fixed anchor
+    /// day, so the bindings read and write pure minutes-of-day.
+    private var workHoursRow: some View {
+        HStack(spacing: 6) {
+            Text("Work hours")
+                .foregroundStyle(.secondary)
+                .padding(.trailing, 6)
+            DatePicker(
+                "Work hours start",
+                selection: windowMinuteBinding(\.startMinute),
+                displayedComponents: .hourAndMinute
+            )
+            .labelsHidden()
+            .fixedSize()
+            Text("to")
+                .foregroundStyle(.secondary)
+            DatePicker(
+                "Work hours end",
+                selection: windowMinuteBinding(\.endMinute),
+                displayedComponents: .hourAndMinute
+            )
+            .labelsHidden()
+            .fixedSize()
+        }
+    }
+
+    private static let workWindowAnchor = Calendar.current.startOfDay(for: .now)
+
+    private func windowMinuteBinding(_ keyPath: WritableKeyPath<WorkWindow, Int>) -> Binding<Date> {
+        Binding {
+            let window = appState.config.client(id: client.id)?.effectiveWorkWindow ?? .default
+            return Self.workWindowAnchor.addingTimeInterval(TimeInterval(window[keyPath: keyPath] * 60))
+        } set: { newDate in
+            guard var updated = appState.config.client(id: client.id) else { return }
+            let rawMinutes = Int(newDate.timeIntervalSince(Self.workWindowAnchor) / 60)
+            let minutes = ((rawMinutes % 1440) + 1440) % 1440
+            var window = updated.effectiveWorkWindow
+            window[keyPath: keyPath] = minutes
+            updated.workWindow = window
+            appState.config.update(updated)
         }
     }
 

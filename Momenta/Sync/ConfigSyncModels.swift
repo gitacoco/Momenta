@@ -18,6 +18,9 @@ struct SyncedClientConfig: Codable, Equatable, Sendable {
     /// Mirrors `ClientConfig.dormantHourlyRate`: the rate parked while billing
     /// is off, so re-enabling on another Mac can still offer it.
     var dormantHourlyRate: Decimal?
+    /// Mirrors `ClientConfig.workWindow` (nil == the shared default window).
+    /// Optional so payloads written before this field decode cleanly.
+    var workWindow: WorkWindow?
     /// A content identity, not a local file name. The matching bytes live in
     /// a separate per-client CKAsset record.
     var logoRevision: String?
@@ -33,6 +36,7 @@ struct SyncedClientConfig: Codable, Equatable, Sendable {
         currencyCode: String?,
         billableFlag: Bool? = nil,
         dormantHourlyRate: Decimal? = nil,
+        workWindow: WorkWindow? = nil,
         logoRevision: String?
     ) {
         self.clientID = clientID
@@ -45,6 +49,7 @@ struct SyncedClientConfig: Codable, Equatable, Sendable {
         self.currencyCode = currencyCode
         self.billableFlag = billableFlag
         self.dormantHourlyRate = dormantHourlyRate
+        self.workWindow = workWindow
         self.logoRevision = logoRevision
     }
 
@@ -59,6 +64,7 @@ struct SyncedClientConfig: Codable, Equatable, Sendable {
         currencyCode = client.currencyCode
         billableFlag = client.billableFlag
         dormantHourlyRate = client.dormantHourlyRate
+        workWindow = client.workWindow
         self.logoRevision = logoRevision
     }
 
@@ -73,6 +79,7 @@ struct SyncedClientConfig: Codable, Equatable, Sendable {
         projected.currencyCode = currencyCode
         projected.billableFlag = billableFlag
         projected.dormantHourlyRate = dormantHourlyRate
+        projected.workWindow = workWindow
         projected.logoFileName = localLogoFileName
         return projected
     }
@@ -103,6 +110,7 @@ struct SyncedClientConfig: Codable, Equatable, Sendable {
             || currencyCode != nil
             || billableFlag != nil
             || dormantHourlyRate != nil
+            || workWindow != nil
             || logoRevision != nil
     }
 }
@@ -232,6 +240,9 @@ struct SyncedConfigPayload: Codable, Equatable, Sendable {
                 if chosen.currencyCode == nil {
                     chosen.currencyCode = local.currencyCode
                 }
+                if chosen.workWindow == nil {
+                    chosen.workWindow = local.workWindow
+                }
                 chosen.normalizeBillingRates()
                 mergedClients[id] = chosen
             case (let local?, nil):
@@ -299,6 +310,11 @@ struct SyncedConfigPayload: Codable, Equatable, Sendable {
                 local: local.dormantHourlyRate,
                 server: server.dormantHourlyRate
             ),
+            workWindow: mergeField(
+                base: base?.workWindow,
+                local: local.workWindow,
+                server: server.workWindow
+            ),
             logoRevision: mergeField(
                 base: base?.logoRevision,
                 local: local.logoRevision,
@@ -359,14 +375,14 @@ struct SyncedConfigPayload: Codable, Equatable, Sendable {
 /// Persisted per-account sync state. `shadow` remains complete even when the
 /// current Toggl/UI projection is incomplete; `base` is strictly device-local.
 struct ConfigSyncLocalState: Codable, Equatable, Sendable {
-    /// Version 2 introduced `billableFlag` and `dormantHourlyRate`. The bump
-    /// is what protects each field: a version-1 device would decode the
-    /// payload fine (unknown keys are ignored), then re-upload without the
-    /// field, and a three-way merge on the newer device would read that as an
-    /// explicit revert to billable. Failing closed on the older device instead
-    /// routes it through the existing unsupported-schema stop until it
-    /// updates.
-    static let supportedSchemaVersion = 2
+    /// Version 2 introduced `billableFlag` and `dormantHourlyRate`; version 3
+    /// introduced `workWindow`. The bump is what protects each field: an older
+    /// device would decode the payload fine (unknown keys are ignored), then
+    /// re-upload without the field, and a three-way merge on the newer device
+    /// would read that as an explicit revert. Failing closed on the older
+    /// device instead routes it through the existing unsupported-schema stop
+    /// until it updates.
+    static let supportedSchemaVersion = 3
 
     var shadow: SyncedConfigPayload
     var base: SyncedConfigPayload?

@@ -90,13 +90,21 @@ private enum PeriodChartAxis {
     }
 
     static func xTicks(for model: PeriodChartModel, plotWidth: CGFloat) -> [AxisTick<Date>] {
-        PeriodChartLayout.dateTicks(
+        let isHourScale = model.period == .day
+        return PeriodChartLayout.dateTicks(
             days: model.days,
             availableWidth: Double(plotWidth)
         ).map { date in
-            let label = date.formatted(.dateTime.month(.abbreviated).day())
+            let label = isHourScale
+                ? date.formatted(.dateTime.hour())
+                : date.formatted(.dateTime.month(.abbreviated).day())
+            // Hour ticks get their own id namespace (odd vs even): today's
+            // midnight coincides with the week/month date tick in time, but
+            // its label differs ("12 AM" vs "Jul 27"), so sharing identity
+            // would carry the wrong label through a period transition.
+            let seconds = Int(date.timeIntervalSinceReferenceDate.rounded())
             return AxisTick(
-                id: Int(date.timeIntervalSinceReferenceDate.rounded()),
+                id: seconds * 2 + (isHourScale ? 1 : 0),
                 value: date,
                 label: label,
                 labelWidth: labelWidth(label),
@@ -335,6 +343,12 @@ private struct AnimatedPeriodChartHost<Content: View>: View {
         from current: PeriodChartModel,
         to next: PeriodChartModel
     ) -> (start: PeriodChartModel, end: PeriodChartModel) {
+        // Day marks sample hours while week/month marks sample days, so the
+        // increments-agree offset rebase does not apply across that boundary;
+        // projection mounting does.
+        if (current.period == .day) != (next.period == .day) {
+            return crossScaleUnionModels(from: current, to: next)
+        }
         let planned = unionSeries(current: current.plannedPoints, next: next.plannedPoints)
         let actual = unionSeries(current: current.actualPoints, next: next.actualPoints)
         var start = current
@@ -344,6 +358,72 @@ private struct AnimatedPeriodChartHost<Content: View>: View {
         end.plannedPoints = planned.end
         end.actualPoints = actual.end
         return (start, end)
+    }
+
+    /// Week/Month <-> Day: entering marks mount projected onto the outgoing
+    /// series (clamped onto an endpoint outside its span, interpolated on the
+    /// polyline inside it), and exiting marks land on the incoming series the
+    /// same way before pruning. Both boundary states therefore add or remove
+    /// no pixels, and the zoom in between reads as the day's mark unfurling
+    /// into the intraday curve (or folding back into its day).
+    private static func crossScaleUnionModels(
+        from current: PeriodChartModel,
+        to next: PeriodChartModel
+    ) -> (start: PeriodChartModel, end: PeriodChartModel) {
+        let planned = crossScaleUnionSeries(current: current.plannedPoints, next: next.plannedPoints)
+        let actual = crossScaleUnionSeries(current: current.actualPoints, next: next.actualPoints)
+        var start = current
+        start.plannedPoints = planned.start
+        start.actualPoints = actual.start
+        var end = next
+        end.plannedPoints = planned.end
+        end.actualPoints = actual.end
+        return (start, end)
+    }
+
+    private static func crossScaleUnionSeries(
+        current: [PeriodChartPoint],
+        next: [PeriodChartPoint]
+    ) -> (start: [PeriodChartPoint], end: [PeriodChartPoint]) {
+        let currentByID = Dictionary(uniqueKeysWithValues: current.map { ($0.id, $0) })
+        let nextByID = Dictionary(uniqueKeysWithValues: next.map { ($0.id, $0) })
+        let union = (current + next.filter { currentByID[$0.id] == nil })
+            .sorted { $0.day < $1.day }
+        let start = union.map { currentByID[$0.id] ?? projected($0, onto: current) }
+        let end = union.map { nextByID[$0.id] ?? projected($0, onto: next) }
+        return (start, end)
+    }
+
+    /// The point re-positioned onto `series` so it lies on the already-drawn
+    /// polyline: outside the series' span both the date and the values snap to
+    /// the nearest endpoint; inside it the date holds and the values
+    /// interpolate linearly. An empty series leaves the point unchanged.
+    private static func projected(
+        _ point: PeriodChartPoint,
+        onto series: [PeriodChartPoint]
+    ) -> PeriodChartPoint {
+        guard let first = series.first, let last = series.last else { return point }
+        var landed = point
+        if point.day <= first.day {
+            landed.day = first.day
+            landed.actual = first.actual
+            landed.planned = first.planned
+        } else if point.day >= last.day {
+            landed.day = last.day
+            landed.actual = last.actual
+            landed.planned = last.planned
+        } else {
+            // first.day < point.day < last.day, so a following point exists
+            // and its index is at least 1.
+            let followingIndex = series.firstIndex { $0.day >= point.day }!
+            let following = series[followingIndex]
+            let preceding = series[followingIndex - 1]
+            let span = following.day.timeIntervalSince(preceding.day)
+            let fraction = span > 0 ? point.day.timeIntervalSince(preceding.day) / span : 0
+            landed.actual = preceding.actual + (following.actual - preceding.actual) * fraction
+            landed.planned = preceding.planned + (following.planned - preceding.planned) * fraction
+        }
+        return landed
     }
 
     private static func unionSeries(
@@ -411,6 +491,10 @@ struct ClientCardView: View {
 
     var data: ClientCardData
     var unit: DisplayUnit
+    /// How a day card renders: the bullet capsule against the day pace, or
+    /// the intraday timeline whose plan ramps inside the work window. Ignored
+    /// by week and month cards.
+    var dayStyle: DayViewStyle = .capsule
     /// Whether the shown period contains "now". A back-stepped past period
     /// keeps its endpoint value label but drops the marker dot — the dot is
     /// a live-edge cue, and a finished week/month has no live edge.
@@ -432,8 +516,21 @@ struct ClientCardView: View {
     private var isAhead: Bool {
         switch data {
         case .month(let progress): return progress.isAhead
-        case .day(let slice), .week(let slice): return slice.isAhead
+        case .week(let slice): return slice.isAhead
+        case .day(let slice):
+            // The timeline compares against the plan-at-now (the work-window
+            // ramp), not the whole-day pace: a morning before work starts is
+            // on pace, not behind.
+            if isTimelineDay, let expected = timelineExpectedAtNow(slice) {
+                return slice.actualHours >= expected.hours
+            }
+            return slice.isAhead
         }
+    }
+
+    private var isTimelineDay: Bool {
+        if case .day = data { return dayStyle == .timeline }
+        return false
     }
 
     private var clientColor: Color {
@@ -484,8 +581,8 @@ struct ClientCardView: View {
                     monthMetrics(progress)
                 case .week(let slice):
                     weekMetrics(slice)
-                case .day:
-                    EmptyView()
+                case .day(let slice):
+                    dayTimelineMetrics(slice)
                 }
             } else if case .day(let slice) = data {
                 dayBullet(slice)
@@ -500,7 +597,7 @@ struct ClientCardView: View {
 
     private var bodyIsChart: Bool {
         switch data {
-        case .day: return false
+        case .day(let slice): return isTimelineDay && !slice.points.isEmpty
         case .month, .week: return true
         }
     }
@@ -592,16 +689,42 @@ struct ClientCardView: View {
                     revenue: slice.actualRevenue
                 )
             )
-        case .day:
-            nil
+        case .day(let slice):
+            if isTimelineDay, !slice.points.isEmpty {
+                makeDayChartModel(slice)
+            } else {
+                nil
+            }
         }
+    }
+
+    /// The timeline model for a day slice: intraday breakpoints as marks, the
+    /// day's hour grid as the tick source. The plan is present only when the
+    /// slice carries a ramp (a goal on a scheduled day).
+    private func makeDayChartModel(_ slice: ClientPeriodSlice) -> PeriodChartModel {
+        let dayStart = slice.points.first!.day
+        let dayEnd = slice.points.last!.day
+        let daySpan = dayEnd.timeIntervalSince(dayStart)
+        // Even fractions of the real day rather than fixed 3600s steps, so a
+        // DST-shifted day still spreads its ticks edge to edge.
+        let hourMarks = (0...24).map { dayStart.addingTimeInterval(daySpan * Double($0) / 24) }
+        return makeChartModel(
+            period: .day,
+            points: slice.points,
+            hasGoal: slice.points.contains { $0.plannedHours != nil },
+            marker: unitText(hours: slice.actualHours, revenue: slice.actualRevenue),
+            tickDays: hourMarks,
+            xDomain: dayStart...dayEnd
+        )
     }
 
     private func makeChartModel(
         period: AggregationPeriod,
         points: [DayProgressPoint],
         hasGoal: Bool,
-        marker: String
+        marker: String,
+        tickDays: [Date]? = nil,
+        xDomain: ClosedRange<Date>? = nil
     ) -> PeriodChartModel {
         precondition(!points.isEmpty, "Period charts require a complete date domain")
 
@@ -620,8 +743,8 @@ struct ClientCardView: View {
 
         return PeriodChartModel(
             period: period,
-            days: points.map(\.day),
-            xDomain: points.first!.day...points.last!.day,
+            days: tickDays ?? points.map(\.day),
+            xDomain: xDomain ?? points.first!.day...points.last!.day,
             plannedPoints: plannedPoints,
             actualPoints: actualPoints,
             hasGoal: hasGoal,
@@ -822,23 +945,81 @@ struct ClientCardView: View {
         return "\(magnitude) \(slice.isAhead ? "ahead" : "behind")"
     }
 
+    // MARK: Metrics — day timeline
+
+    /// The metrics row under a day timeline chart: the same encouragement
+    /// voice as the bullet, but the delta compares against the plan-at-now
+    /// from the work-window ramp rather than the whole-day pace.
+    @ViewBuilder
+    private func dayTimelineMetrics(_ slice: ClientPeriodSlice) -> some View {
+        if slice.isRestDay {
+            dayOffRow(slice)
+        } else if let targetHours = slice.targetHours, targetHours > 0 {
+            let done = slice.actualHours >= targetHours
+            let fraction = (slice.actualHours / targetHours).doubleValue
+            HStack(alignment: .firstTextBaseline) {
+                Text(dayMessage(fraction: fraction, done: done))
+                    .font(.callout.weight(.semibold))
+                    .foregroundStyle(.primary)
+                Spacer()
+                deltaBadge(timelineDeltaText(slice))
+            }
+        } else {
+            loggedOnlyRow(slice)
+        }
+    }
+
+    /// The plan value at the timeline's live tip (the last measured point),
+    /// i.e. what the work-window ramp expects as of now. Nil without a ramp.
+    private func timelineExpectedAtNow(_ slice: ClientPeriodSlice) -> (hours: Decimal, revenue: Decimal)? {
+        guard let tip = slice.points.last(where: { $0.actualHours != nil }),
+              let hours = tip.plannedHours,
+              let revenue = tip.plannedRevenue else { return nil }
+        return (hours, revenue)
+    }
+
+    private func timelineDeltaText(_ slice: ClientPeriodSlice) -> String? {
+        guard let expected = timelineExpectedAtNow(slice) else { return nil }
+        let deltaHours = slice.actualHours - expected.hours
+        let deltaRevenue = slice.actualRevenue - expected.revenue
+        if deltaHours == 0 { return "on pace" }
+        let magnitude = unitText(hours: abs(deltaHours), revenue: abs(deltaRevenue))
+        return "\(magnitude) \(deltaHours >= 0 ? "ahead" : "behind")"
+    }
+
     // MARK: Bullet — day
+
+    /// A scheduled day off: flat plan, so no bullet and no behind/ahead
+    /// badge. Any hours logged anyway are shown as a bonus, not debt.
+    private func dayOffRow(_ slice: ClientPeriodSlice) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            Text("Day off")
+                .font(.title3.weight(.semibold))
+            if slice.actualHours > 0 {
+                Text("· \(unitText(hours: slice.actualHours, revenue: slice.actualRevenue)) logged")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+        }
+    }
+
+    /// No goal for the day (rate-backfilled history): just the logged time.
+    private func loggedOnlyRow(_ slice: ClientPeriodSlice) -> some View {
+        HStack {
+            Text(unitText(hours: slice.actualHours, revenue: slice.actualRevenue))
+                .font(.title3.weight(.semibold).monospacedDigit())
+            Text("logged")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+            Spacer()
+        }
+    }
 
     @ViewBuilder
     private func dayBullet(_ slice: ClientPeriodSlice) -> some View {
         if slice.isRestDay {
-            // A scheduled day off: flat plan, so no bullet and no behind/ahead
-            // badge. Any hours logged anyway are shown as a bonus, not debt.
-            HStack(alignment: .firstTextBaseline, spacing: 6) {
-                Text("Day off")
-                    .font(.title3.weight(.semibold))
-                if slice.actualHours > 0 {
-                    Text("· \(unitText(hours: slice.actualHours, revenue: slice.actualRevenue)) logged")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-            }
+            dayOffRow(slice)
         } else if let targetHours = slice.targetHours, targetHours > 0 {
             let fraction = min(max((slice.actualHours / targetHours).doubleValue, 0), 1)
             VStack(alignment: .leading, spacing: 4) {
@@ -871,15 +1052,7 @@ struct ClientCardView: View {
                     .padding(.top, 6)
             }
         } else {
-            // No goal for the day (rate-backfilled history): just the logged time.
-            HStack {
-                Text(unitText(hours: slice.actualHours, revenue: slice.actualRevenue))
-                    .font(.title3.weight(.semibold).monospacedDigit())
-                Text("logged")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                Spacer()
-            }
+            loggedOnlyRow(slice)
         }
     }
 

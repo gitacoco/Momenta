@@ -937,12 +937,18 @@ final class AppState {
         case .day:
             let monthProgress = monthProgressByID()
             let isCurrent = isReferenceCurrentDay
+            // The same clock the month progress used, so the timeline's tip
+            // and the day totals agree (no local ticking between syncs).
+            let entries = selectedSnapshot?.entries ?? []
+            let entriesNow = selectedSnapshot?.fetchedAt ?? displayNow
             let slices = monthProgress.mapValues { progress in
                 ProgressCalculator.daySlice(
                     progress: progress,
+                    entries: entries,
                     reference: activeReference,
                     isCurrentDay: isCurrent,
-                    timeZone: timeZone
+                    timeZone: timeZone,
+                    now: entriesNow
                 )
             }
             return .complete(PopoverData(

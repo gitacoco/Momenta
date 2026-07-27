@@ -18,6 +18,7 @@ struct ConfigSyncModelsTests {
         // Nil means "never authored on this side" — the case the initial
         // merge's fallbacks turn on.
         currencyCode: String? = "USD",
+        workWindow: WorkWindow? = nil,
         goals: [YearMonth: MonthlyGoal] = [:],
         logo: String? = nil
     ) -> SyncedClientConfig {
@@ -32,6 +33,7 @@ struct ConfigSyncModelsTests {
             currencyCode: currencyCode,
             billableFlag: billableFlag,
             dormantHourlyRate: dormantHourlyRate,
+            workWindow: workWindow,
             logoRevision: logo
         )
     }
@@ -347,6 +349,32 @@ struct ConfigSyncModelsTests {
         #expect(merged.clients[1]?.billableFlag == true)
         #expect(merged.clients[1]?.dormantHourlyRate == 80)
         #expect(merged.clients[1]?.currencyCode == "GBP")
+    }
+
+    @Test func initialMergeKeepsALocalWorkWindowTheServerNeverAuthored() {
+        // A v2 payload has no work window at all, so adoption would otherwise
+        // reset this Mac's custom hours to the 9:00-18:00 default and upload
+        // that. Nil means "never authored": the editor always writes a
+        // non-nil window once touched.
+        let custom = WorkWindow(startMinute: 7 * 60, endMinute: 15 * 60)
+        let local = payload([client(1, workWindow: custom)])
+        let server = payload([client(1, color: "#FF0000")])
+
+        let merged = SyncedConfigPayload.initialMerge(local: local, server: server)
+
+        #expect(merged.clients[1]?.colorHex == "#FF0000")
+        #expect(merged.clients[1]?.workWindow == custom)
+    }
+
+    @Test func initialMergePrefersTheServerWorkWindowWhenBothAuthored() {
+        let localWindow = WorkWindow(startMinute: 7 * 60, endMinute: 15 * 60)
+        let serverWindow = WorkWindow(startMinute: 10 * 60, endMinute: 19 * 60)
+        let local = payload([client(1, workWindow: localWindow)])
+        let server = payload([client(1, workWindow: serverWindow)])
+
+        let merged = SyncedConfigPayload.initialMerge(local: local, server: server)
+
+        #expect(merged.clients[1]?.workWindow == serverWindow)
     }
 
     @Test func syncStateStorePersistsShadowBaseAndDirtyState() {

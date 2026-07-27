@@ -489,7 +489,7 @@ struct ProgressCalculatorTests {
             for: config, entries: entries, month: july, timeZone: utc, now: now
         )!
         let slice = ProgressCalculator.daySlice(
-            progress: progress, reference: now, isCurrentDay: true, timeZone: utc
+            progress: progress, entries: entries, reference: now, isCurrentDay: true, timeZone: utc, now: now
         )
         // The reference day's own hours, not the 13h month cumulative.
         #expect(slice.actualHours == 3)
@@ -511,7 +511,8 @@ struct ProgressCalculatorTests {
         )!
         // Back-stepped to July 16 while the current day is July 20.
         let slice = ProgressCalculator.daySlice(
-            progress: progress, reference: date(day: 16, hour: 8), isCurrentDay: false, timeZone: utc
+            progress: progress, entries: entries, reference: date(day: 16, hour: 8),
+            isCurrentDay: false, timeZone: utc, now: now
         )
         // 10h logged before the 16th, frozen over the scheduled weekdays from
         // the 16th onward — the same pace requiredDailyHours produces at day start.
@@ -696,7 +697,7 @@ struct ProgressCalculatorTests {
             for: config, entries: entries, month: july, timeZone: utc, now: now
         )!
         let slice = ProgressCalculator.daySlice(
-            progress: progress, reference: now, isCurrentDay: true, timeZone: utc
+            progress: progress, entries: entries, reference: now, isCurrentDay: true, timeZone: utc, now: now
         )
         // A day off carries a flat plan: no target and no behind/ahead debt,
         // even though the client still has a monthly goal in effect.
@@ -718,10 +719,111 @@ struct ProgressCalculatorTests {
             for: config, entries: entries, month: july, timeZone: utc, now: now
         )!
         let slice = ProgressCalculator.daySlice(
-            progress: progress, reference: now, isCurrentDay: true, timeZone: utc
+            progress: progress, entries: entries, reference: now, isCurrentDay: true, timeZone: utc, now: now
         )
         #expect(!slice.isRestDay)
         #expect(slice.targetHours == progress.requiredDailyHours)
+    }
+
+    // MARK: Day timeline points
+
+    @Test func dayTimelinePlanRampsOnlyInsideWorkWindow() {
+        let goal = MonthlyGoal(hourlyRate: 100, input: .hours(50))
+        var config = client(pacing: .calendarDays, goal: goal)
+        config.workWindow = WorkWindow(startMinute: 9 * 60, endMinute: 17 * 60)
+        let now = date(day: 16, hour: 20)
+        let progress = ProgressCalculator.progress(
+            for: config, entries: [], month: july, timeZone: utc, now: now
+        )!
+        let slice = ProgressCalculator.daySlice(
+            progress: progress, entries: [], reference: now, isCurrentDay: true, timeZone: utc, now: now
+        )
+        let target = slice.targetHours!
+
+        func planned(at hour: Int) -> Decimal? {
+            slice.points.first { $0.day == date(day: 16, hour: hour) }?.plannedHours
+        }
+        // Flat zero before the window: an early morning owes nothing.
+        #expect(planned(at: 0) == 0)
+        #expect(planned(at: 9) == 0)
+        // Full target at the window's end and through the rest of the day.
+        #expect(planned(at: 17) == target)
+        // The plan spans the whole day, so the last point sits at the day end.
+        #expect(slice.points.last?.day == date(day: 17))
+        #expect(slice.points.last?.plannedHours == target)
+    }
+
+    @Test func dayTimelineActualAccumulatesAlongEntriesAndStopsAtNow() {
+        let goal = MonthlyGoal(hourlyRate: 100, input: .hours(50))
+        let config = client(pacing: .calendarDays, goal: goal)
+        let now = date(day: 16, hour: 14)
+        let entries = [
+            TimeEntry(id: 1, clientID: 1, start: date(day: 16, hour: 9), stop: date(day: 16, hour: 11)), // 2h
+            TimeEntry(id: 2, clientID: 1, start: date(day: 16, hour: 13), stop: nil), // running, 1h so far
+        ]
+        let progress = ProgressCalculator.progress(
+            for: config, entries: entries, month: july, timeZone: utc, now: now
+        )!
+        let slice = ProgressCalculator.daySlice(
+            progress: progress, entries: entries, reference: now, isCurrentDay: true, timeZone: utc, now: now
+        )
+
+        func actual(at hour: Int) -> Decimal? {
+            slice.points.first { $0.day == date(day: 16, hour: hour) }?.actualHours
+        }
+        #expect(actual(at: 9) == 0)
+        #expect(actual(at: 11) == 2)
+        // Flat between entries.
+        #expect(actual(at: 13) == 2)
+        // The tip sits at now with the day's attributed total (running entry
+        // counted to the shared clock), then the future is unmeasured.
+        #expect(actual(at: 14) == 3)
+        #expect(actual(at: 14) == slice.actualHours)
+        let futurePoints = slice.points.filter { $0.day > now }
+        #expect(!futurePoints.isEmpty)
+        #expect(futurePoints.allSatisfy { $0.actualHours == nil })
+    }
+
+    @Test func dayTimelineRestDayHasNoPlanButKeepsActual() {
+        let goal = MonthlyGoal(hourlyRate: 100, input: .hours(50))
+        var config = client(pacing: .custom, goal: goal)
+        config.customWorkDays = [1, 2, 3, 4, 7] // Thursday and Friday off
+        let now = date(day: 23, hour: 16) // Thursday — a scheduled day off
+        let entries = [
+            TimeEntry(id: 1, clientID: 1, start: date(day: 23, hour: 9), stop: date(day: 23, hour: 10)),
+        ]
+        let progress = ProgressCalculator.progress(
+            for: config, entries: entries, month: july, timeZone: utc, now: now
+        )!
+        let slice = ProgressCalculator.daySlice(
+            progress: progress, entries: entries, reference: now, isCurrentDay: true, timeZone: utc, now: now
+        )
+        // Bonus hours still draw; the plan stays absent so nothing reads as debt.
+        #expect(slice.points.allSatisfy { $0.plannedHours == nil })
+        #expect(slice.points.contains { $0.actualHours == 1 })
+    }
+
+    @Test func dayTimelineTipPinsToAttributedTotalWhenEntrySpillsPastMidnight() {
+        let goal = MonthlyGoal(hourlyRate: 100, input: .hours(50))
+        let config = client(pacing: .calendarDays, goal: goal)
+        let now = date(day: 20, hour: 12)
+        let entries = [
+            // Starts July 16 at 23:00, runs to July 17 at 02:00: 3h, all
+            // attributed to the 16th by start time.
+            TimeEntry(id: 1, clientID: 1, start: date(day: 16, hour: 23), stop: date(day: 17, hour: 2)),
+        ]
+        let progress = ProgressCalculator.progress(
+            for: config, entries: entries, month: july, timeZone: utc, now: now
+        )!
+        let slice = ProgressCalculator.daySlice(
+            progress: progress, entries: entries, reference: date(day: 16, hour: 8),
+            isCurrentDay: false, timeZone: utc, now: now
+        )
+        #expect(slice.actualHours == 3)
+        // The curve grows only inside the day, but the final point pins to the
+        // attributed total so the tip matches the bullet and marker.
+        #expect(slice.points.last?.day == date(day: 17))
+        #expect(slice.points.last?.actualHours == 3)
     }
 
     @Test func dayClientShareAndOverallAreNeutralOnRestDay() {

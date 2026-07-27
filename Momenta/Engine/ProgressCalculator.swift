@@ -527,14 +527,18 @@ enum ProgressCalculator {
 
     // MARK: Popover period slices
 
-    /// The day bullet: the reference day's own hours against the catch-up pace.
+    /// The day slice: the reference day's own hours against the catch-up pace.
     /// The current day uses the live pace (matching the client card and menu
-    /// bar); a past day freezes the pace at that day's start.
+    /// bar); a past day freezes the pace at that day's start. `points` carries
+    /// the intraday cumulative series for the timeline style; the bullet
+    /// ignores it.
     static func daySlice(
         progress: ClientProgress,
+        entries: [TimeEntry],
         reference: Date,
         isCurrentDay: Bool,
-        timeZone: TimeZone
+        timeZone: TimeZone,
+        now: Date
     ) -> ClientPeriodSlice {
         let calendar = YearMonth.calendar(in: timeZone)
         let refDayStart = calendar.startOfDay(for: reference)
@@ -557,11 +561,11 @@ enum ProgressCalculator {
         let isScheduledDay = workWeekdays.contains(calendar.component(.weekday, from: refDayStart))
         let isRestDay = progress.goal != nil && !isScheduledDay
 
-        let target: Decimal? = isRestDay ? nil : progress.goal.map { goal in
-            if isCurrentDay {
-                return progress.requiredDailyHours ?? goal.hours
-            }
-            return requiredDailyHours(
+        // The pace frozen at the day's start: what this day asked for before
+        // any of its own work was logged. The timeline's plan ramp targets
+        // this, so the plan line holds still while the actual line climbs.
+        let dayStartTarget: Decimal? = isRestDay ? nil : progress.goal.map { goal in
+            requiredDailyHours(
                 goal: goal,
                 actualHours: cumulativeBefore,
                 month: progress.month,
@@ -572,13 +576,31 @@ enum ProgressCalculator {
             )
         }
 
+        let target: Decimal? = isRestDay ? nil : progress.goal.map { goal in
+            if isCurrentDay {
+                return progress.requiredDailyHours ?? goal.hours
+            }
+            return dayStartTarget ?? goal.hours
+        }
+
+        let points = dayTimelinePoints(
+            client: progress.client,
+            entries: entries,
+            dayStart: refDayStart,
+            rampTargetHours: dayStartTarget,
+            rate: rate,
+            attributedTotalHours: actual,
+            calendar: calendar,
+            now: now
+        )
+
         return ClientPeriodSlice(
             client: progress.client,
             period: .day,
             hourlyRate: rate,
             hasGoal: progress.goal != nil,
             isRestDay: isRestDay,
-            points: [],
+            points: points,
             actualHours: actual,
             actualRevenue: actual * rate,
             targetHours: target,
@@ -586,6 +608,79 @@ enum ProgressCalculator {
             plannedToDateHours: target,
             plannedToDateRevenue: target.map { $0 * rate }
         )
+    }
+
+    /// The day timeline's intraday series: cumulative actual hours at every
+    /// entry boundary, and a plan that stays flat at zero before the client's
+    /// work window, ramps linearly through it to the day-start pace, and holds
+    /// flat after — so a morning before work starts owes nothing.
+    ///
+    /// Entries attribute to the day by their start time, matching every other
+    /// aggregation. Intraday growth is measured inside the day only, but the
+    /// final point pins to `attributedTotalHours`, so an entry running past
+    /// midnight keeps the tip equal to the day's bullet/marker total (the
+    /// spill appears as a rise at the day's edge rather than vanishing).
+    static func dayTimelinePoints(
+        client: ClientConfig,
+        entries: [TimeEntry],
+        dayStart: Date,
+        rampTargetHours: Decimal?,
+        rate: Decimal,
+        attributedTotalHours: Decimal,
+        calendar: Calendar,
+        now: Date
+    ) -> [DayProgressPoint] {
+        guard let dayEnd = calendar.date(byAdding: .day, value: 1, to: dayStart) else { return [] }
+        let nowClip = min(max(now, dayStart), dayEnd)
+
+        // Spans of work inside the day, from entries the day owns (started
+        // within it), clipped to what has elapsed.
+        var spans: [(start: Date, end: Date)] = []
+        for entry in entries where entry.clientID == client.id {
+            guard entry.start >= dayStart, entry.start < dayEnd else { continue }
+            let end = min(entry.stop ?? now, nowClip)
+            guard end > entry.start else { continue }
+            spans.append((start: entry.start, end: end))
+        }
+
+        let window = client.effectiveWorkWindow
+        let windowStart = dayStart.addingTimeInterval(TimeInterval(window.startMinute * 60))
+        let windowEnd = dayStart.addingTimeInterval(TimeInterval(window.endMinute * 60))
+
+        var breakpoints: Set<Date> = [dayStart, dayEnd, nowClip]
+        for boundary in [windowStart, windowEnd] where boundary > dayStart && boundary < dayEnd {
+            breakpoints.insert(boundary)
+        }
+        for span in spans {
+            breakpoints.insert(span.start)
+            breakpoints.insert(span.end)
+        }
+
+        func cumulativeHours(at time: Date) -> Decimal {
+            let seconds = spans.reduce(0.0) { total, span in
+                total + max(0, min(span.end, time).timeIntervalSince(span.start))
+            }
+            return Decimal(seconds) / 3600
+        }
+
+        return breakpoints.sorted().map { time in
+            let minutes = time.timeIntervalSince(dayStart) / 60
+            let plannedHours = rampTargetHours.map {
+                $0 * Decimal(window.plannedFraction(atMinute: minutes))
+            }
+            var actualHours: Decimal?
+            if time <= nowClip {
+                // The tip pins to the attributed day total; see above.
+                actualHours = time == nowClip ? attributedTotalHours : cumulativeHours(at: time)
+            }
+            return DayProgressPoint(
+                day: time,
+                plannedHours: plannedHours,
+                plannedRevenue: plannedHours.map { $0 * rate },
+                actualHours: actualHours,
+                actualRevenue: actualHours.map { $0 * rate }
+            )
+        }
     }
 
     /// The week card: a true Monday–Sunday cumulative series, stitched across a
