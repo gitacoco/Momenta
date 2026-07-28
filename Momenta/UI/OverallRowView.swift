@@ -43,6 +43,14 @@ struct OverallRowView: View {
         unit == .revenue ? Format.currency(aggregate.targetRevenue) : Format.hours(aggregate.targetHours)
     }
 
+    private var summaryText: String {
+        "\(actualText) / \(targetText) · \(percentText)"
+    }
+
+    /// Short enough to read as the row settling rather than as motion of its
+    /// own — this sits above cards whose charts run a much longer morph.
+    private static let valueChange: Animation = .easeOut(duration: 0.28)
+
     var body: some View {
         HStack(spacing: 9) {
             OverallRingGlyph(fraction: isAvailable ? fraction : nil)
@@ -69,10 +77,15 @@ struct OverallRowView: View {
 
             Spacer(minLength: 8)
 
-            Text("\(actualText) / \(targetText) · \(percentText)")
+            Text(summaryText)
                 .font(.callout.monospacedDigit())
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
+                // Monospaced digits give the numeric transition fixed columns
+                // to roll in, so stepping periods reads as the figures being
+                // re-dialled rather than swapped.
+                .contentTransition(.numericText())
+                .animation(Self.valueChange, value: summaryText)
                 .accessibilityLabel("\(percentText), \(actualText) of \(targetText)")
         }
         .padding(.horizontal, 4)
@@ -199,12 +212,14 @@ private struct OverallRingGlyph: View {
         ZStack {
             Circle()
                 .stroke(Color.primary.opacity(0.16), lineWidth: 2.5)
-            if clampedFraction > 0 {
-                Circle()
-                    .trim(from: 0, to: clampedFraction)
-                    .stroke(Color.secondary, style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
-                    .rotationEffect(.degrees(-90))
-            }
+            // Always mounted, even at zero: inserting the arc on the first
+            // non-zero value would pop it in at full length instead of
+            // sweeping there from the track.
+            Circle()
+                .trim(from: 0, to: clampedFraction)
+                .stroke(Color.secondary, style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
+                .rotationEffect(.degrees(-90))
+                .animation(.easeOut(duration: 0.28), value: clampedFraction)
         }
         .accessibilityHidden(true)
     }
