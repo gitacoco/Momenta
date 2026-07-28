@@ -409,10 +409,10 @@ private struct MenuBarLabelContainer: View {
             settings: appState.displaySettings,
             unit: appState.displayUnit
         )
-        // Ring mode: 2.5pt leading leaves the ring's 19pt visual circle the
-        // same 1.5pt gap on the left as above and below inside the system's
-        // 22pt menu bar capsule, keeping ring and capsule cap concentric.
-        .padding(.leading, appState.displaySettings.menuBarVisualization == .ring ? 2.5 : 5)
+        // The selected status-item capsule paints its left cap about 1pt
+        // inside the button's layout bounds. Compensate in ring mode so the
+        // ring and the visible capsule cap remain concentric.
+        .padding(.leading, appState.displaySettings.menuBarVisualization == .ring ? 1.5 : 5)
         .padding(.trailing, 5)
         .fixedSize(horizontal: true, vertical: false)
         .allowsHitTesting(false)
