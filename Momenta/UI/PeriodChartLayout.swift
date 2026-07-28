@@ -4,6 +4,11 @@ import Foundation
 /// Keeping tick selection, resampling, and domain rounding out of the SwiftUI
 /// builder keeps the animated week/month transition deterministic.
 enum PeriodChartLayout {
+    enum MarkerVerticalPlacement: Equatable {
+        case above
+        case below
+    }
+
     /// `MMM d` at the chart's caption size fits comfortably in this slot on
     /// macOS, including the gap to its neighbor. The fixed slot also makes the
     /// chosen dates stable for a given period and card width.
@@ -59,5 +64,55 @@ enum PeriodChartLayout {
         // from losing its top tick to floating-point noise.
         let count = Int(((upperBound / step) + 1e-9).rounded(.down))
         return (0...count).map { Double($0) * step }
+    }
+
+    /// Chooses the marker-label side using the space that will actually remain
+    /// inside the plot. The planned line still supplies the preferred side,
+    /// but an edge with too little room loses to the opposite side so Charts'
+    /// overflow fitting never has to fold the label back over its own point.
+    static func markerVerticalPlacement(
+        actual: Double,
+        planned: Double,
+        hasGoal: Bool,
+        upperBound: Double,
+        plotHeight: Double,
+        requiredClearance: Double
+    ) -> MarkerVerticalPlacement {
+        let preferred: MarkerVerticalPlacement =
+            hasGoal && actual <= planned ? .below : .above
+
+        guard upperBound.isFinite, upperBound > 0,
+              plotHeight.isFinite, plotHeight > 0 else {
+            return preferred
+        }
+
+        let normalizedActual = min(max(actual / upperBound, 0), 1)
+        let pointY = plotHeight * (1 - normalizedActual)
+        let spaceAbove = pointY
+        let spaceBelow = plotHeight - pointY
+        let clearance = requiredClearance.isFinite
+            ? max(requiredClearance, 0)
+            : 0
+
+        func hasRoom(_ placement: MarkerVerticalPlacement) -> Bool {
+            switch placement {
+            case .above: spaceAbove >= clearance
+            case .below: spaceBelow >= clearance
+            }
+        }
+
+        if hasRoom(preferred) {
+            return preferred
+        }
+
+        let alternate: MarkerVerticalPlacement =
+            preferred == .above ? .below : .above
+        if hasRoom(alternate) {
+            return alternate
+        }
+
+        // An unusually short plot may fit neither side. Choose the larger
+        // pocket so the overflow resolver makes the smallest adjustment.
+        return spaceAbove >= spaceBelow ? .above : .below
     }
 }

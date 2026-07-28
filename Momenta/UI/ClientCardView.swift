@@ -63,6 +63,13 @@ private enum PeriodChartAxis {
     static let labelHeight = ceil(labelFont.ascender - labelFont.descender + labelFont.leading)
     static let xGutterHeight = labelHeight + 4
     static let yLabelLeading: CGFloat = 6
+    static let markerFont = NSFont.preferredFont(forTextStyle: .caption1, options: [:])
+    static let markerLabelHeight = ceil(
+        markerFont.ascender - markerFont.descender + markerFont.leading
+    )
+    static let markerSpacing: CGFloat = 4
+    /// PointMark's symbol size is 36 pt², so its rendered diameter is 6 pt.
+    static let markerRequiredClearance = markerLabelHeight + 3 + markerSpacing
 
     static func labelWidth(_ label: String) -> CGFloat {
         ceil((label as NSString).size(withAttributes: [.font: labelFont]).width)
@@ -129,7 +136,7 @@ private struct AnimatedPeriodChartHost<Content: View>: View {
 
     var target: PeriodChartModel
     var size: CGSize
-    var content: (PeriodChartModel) -> Content
+    var content: (PeriodChartModel, CGFloat) -> Content
 
     @State private var rendered: PeriodChartModel
     @State private var xTicks: [AxisTick<Date>]
@@ -141,7 +148,7 @@ private struct AnimatedPeriodChartHost<Content: View>: View {
     init(
         target: PeriodChartModel,
         size: CGSize,
-        @ViewBuilder content: @escaping (PeriodChartModel) -> Content
+        @ViewBuilder content: @escaping (PeriodChartModel, CGFloat) -> Content
     ) {
         self.target = target
         self.size = size
@@ -180,7 +187,7 @@ private struct AnimatedPeriodChartHost<Content: View>: View {
             }
             .frame(width: plotWidth, height: plotHeight)
             .clipped()
-            content(rendered)
+            content(rendered, plotHeight)
                 .frame(width: plotWidth, height: plotHeight)
                 .clipped()
             ZStack(alignment: .topLeading) {
@@ -623,8 +630,8 @@ struct ClientCardView: View {
                 .padding(.bottom, bodyIsChart ? 8 : 4)
             if let chartModel {
                 GeometryReader { proxy in
-                    AnimatedPeriodChartHost(target: chartModel, size: proxy.size) { rendered in
-                        periodChart(rendered)
+                    AnimatedPeriodChartHost(target: chartModel, size: proxy.size) { rendered, plotHeight in
+                        periodChart(rendered, plotHeight: plotHeight)
                     }
                 }
                 .frame(height: 110)
@@ -802,7 +809,7 @@ struct ClientCardView: View {
         )
     }
 
-    private func periodChart(_ model: PeriodChartModel) -> some View {
+    private func periodChart(_ model: PeriodChartModel, plotHeight: CGFloat) -> some View {
         Chart {
             if model.hasGoal {
                 // Two always-present fills clamped to the planned line: ahead
@@ -864,10 +871,12 @@ struct ClientCardView: View {
                     position: markerAnnotationPosition(
                         actual: todayPoint.actual,
                         planned: todayPoint.planned,
-                        hasGoal: model.hasGoal
+                        hasGoal: model.hasGoal,
+                        upperBound: model.yUpperBound,
+                        plotHeight: plotHeight
                     ),
                     alignment: .center,
-                    spacing: 4,
+                    spacing: PeriodChartAxis.markerSpacing,
                     overflowResolution: AnnotationOverflowResolution(
                         x: .fit(to: .plot),
                         y: .fit(to: .plot)
@@ -890,15 +899,27 @@ struct ClientCardView: View {
         .chartYAxis(.hidden)
     }
 
-    /// At the period boundary the label has no horizontal escape route. Move
-    /// it vertically away from the planned line instead of changing X scale.
+    /// Prefer the side away from the planned line, but flip when that side
+    /// cannot hold the point, spacing, and label inside the plot. This matters
+    /// for low intraday endpoints directly above an hour-axis label.
     private func markerAnnotationPosition(
         actual: Double,
         planned: Double,
-        hasGoal: Bool
+        hasGoal: Bool,
+        upperBound: Double,
+        plotHeight: CGFloat
     ) -> AnnotationPosition {
-        guard hasGoal else { return .top }
-        return actual <= planned ? .bottom : .top
+        switch PeriodChartLayout.markerVerticalPlacement(
+            actual: actual,
+            planned: planned,
+            hasGoal: hasGoal,
+            upperBound: upperBound,
+            plotHeight: Double(plotHeight),
+            requiredClearance: Double(PeriodChartAxis.markerRequiredClearance)
+        ) {
+        case .above: .top
+        case .below: .bottom
+        }
     }
 
     private func value(planned point: DayProgressPoint) -> Double {

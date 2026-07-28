@@ -56,4 +56,73 @@ struct PeriodChartLayoutTests {
         }
         #expect(PeriodChartLayout.yAxisTicks(upperBound: 0) == [0])
     }
+
+    @Test func markerStaysAwayFromPlanWhenBothSidesFit() {
+        #expect(
+            PeriodChartLayout.markerVerticalPlacement(
+                actual: 4,
+                planned: 6,
+                hasGoal: true,
+                upperBound: 10,
+                plotHeight: 100,
+                requiredClearance: 20
+            ) == .below
+        )
+        #expect(
+            PeriodChartLayout.markerVerticalPlacement(
+                actual: 6,
+                planned: 4,
+                hasGoal: true,
+                upperBound: 10,
+                plotHeight: 100,
+                requiredClearance: 20
+            ) == .above
+        )
+    }
+
+    @Test func markerFlipsAwayFromPlotEdges() {
+        #expect(
+            PeriodChartLayout.markerVerticalPlacement(
+                actual: 0.1,
+                planned: 5,
+                hasGoal: true,
+                upperBound: 10,
+                plotHeight: 100,
+                requiredClearance: 20
+            ) == .above
+        )
+        #expect(
+            PeriodChartLayout.markerVerticalPlacement(
+                actual: 9.9,
+                planned: 5,
+                hasGoal: true,
+                upperBound: 10,
+                plotHeight: 100,
+                requiredClearance: 20
+            ) == .below
+        )
+    }
+
+    @Test func markerUsesLargerPocketWhenNeitherSideFits() {
+        #expect(
+            PeriodChartLayout.markerVerticalPlacement(
+                actual: 3,
+                planned: 4,
+                hasGoal: true,
+                upperBound: 10,
+                plotHeight: 20,
+                requiredClearance: 18
+            ) == .above
+        )
+        #expect(
+            PeriodChartLayout.markerVerticalPlacement(
+                actual: 7,
+                planned: 6,
+                hasGoal: true,
+                upperBound: 10,
+                plotHeight: 20,
+                requiredClearance: 18
+            ) == .below
+        )
+    }
 }
