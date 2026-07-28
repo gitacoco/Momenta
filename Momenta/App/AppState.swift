@@ -192,8 +192,9 @@ final class AppState {
         rescheduleIntervalRefresh()
         if autoRefresh {
             Task {
-                // Launch refresh respects manual-only mode too.
-                await self.refreshIfNeeded()
+                // Both automatic modes fetch once at launch; interval mode then
+                // follows its timer without reacting to popover presentation.
+                await self.refreshAtLaunchIfNeeded()
             }
         }
     }
@@ -268,8 +269,8 @@ final class AppState {
     /// Drives the `.interval` refresh mode: a loop that fetches every
     /// user-chosen span of minutes and no-ops in any other mode. Restarted
     /// whenever the mode or interval changes so a new cadence takes effect at
-    /// once. Each tick uses the throttled `refresh()`, so a popover-open fetch
-    /// moments earlier is reused rather than double-spent.
+    /// once. The popover-presentation path is disabled in this mode, so opening
+    /// the panel cannot spend an extra request.
     private func rescheduleIntervalRefresh() {
         intervalRefreshTick?.cancel()
         intervalRefreshTick = nil
@@ -353,16 +354,35 @@ final class AppState {
 
     // MARK: Loading
 
-    /// Popover-open path: disabled entirely in manual-refresh mode, and
-    /// throttled otherwise so repeatedly opening and closing the popover
-    /// cannot burn through the API quota. Manual refresh bypasses both.
-    func refreshIfNeeded() async {
+    /// Initial launch path: both automatic modes fetch once, while manual mode
+    /// remains entirely user-driven.
+    func refreshAtLaunchIfNeeded() async {
         guard displaySettings.allowsPassiveFetch else { return }
+        await refreshWithinThrottleIfNeeded()
+    }
+
+    /// Foreground / popover-open path: enabled only in `.onOpen` mode, then
+    /// throttled so repeated lifecycle events cannot burn through the API
+    /// quota. Interval ticks and manual refresh bypass this path.
+    func refreshIfNeeded() async {
+        guard displaySettings.refreshesOnOpen else { return }
+        await refreshWithinThrottleIfNeeded()
+    }
+
+    private func refreshWithinThrottleIfNeeded() async {
         if let last = lastAutoRefreshAt,
            Date().timeIntervalSince(last) < Self.minAutoRefreshInterval {
             return
         }
         await refresh()
+    }
+
+    /// The popover's single presentation hook. Interval and manual modes do no
+    /// network work here, including loading a missing cross-month week.
+    func popoverDidOpen() async {
+        guard displaySettings.refreshesOnOpen else { return }
+        await refreshIfNeeded()
+        prepareWeekNeighbors(userInitiated: false)
     }
 
     /// Full refresh: available months, the current month, and the selected

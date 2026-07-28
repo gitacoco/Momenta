@@ -126,10 +126,11 @@ the Toggl entries counted as actual work.
 
 ### Refresh behavior
 
-By default, app launch and opening the popover use the automatic refresh path,
-which fetches live data at most once per minute. **Manually only** disables
-that automatic refresh; the Refresh command always bypasses the throttle. This
-mode is useful for Toggl plans with a limited API request budget.
+**When the popover opens** refreshes on app launch, foreground activation, and
+popover presentation, with a one-minute throttle across those events. **On a
+set interval** refreshes once at app launch and then on the selected cadence;
+opening the popover does not fetch data. **Manually only** disables both
+automatic paths. The Refresh command always performs an immediate refresh.
 
 ## Privacy and local data
 

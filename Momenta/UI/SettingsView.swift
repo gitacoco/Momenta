@@ -281,7 +281,7 @@ struct SettingsView: View {
                     }
                 }
 
-                Text("Toggl's free plan allows 30 API requests per hour. Manual mode spends them only when you ask; interval mode spends them on the schedule above (5–240 minutes).")
+                Text("Toggl's free plan allows 30 API requests per hour. Manual mode spends them only when you ask; interval mode uses the schedule above instead of refreshing when the popover opens (5–240 minutes).")
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
 

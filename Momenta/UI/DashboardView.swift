@@ -53,13 +53,9 @@ struct DashboardView: View {
         // popover height from the view's actual content.
         .frame(width: 380)
         .task {
-            // Refresh when the popover opens, throttled so repeated opens
-            // don't burn the API quota.
-            await appState.refreshIfNeeded()
-            // A current week can straddle into a past neighbouring month.
-            // Opening the popover is a passive trigger, so this respects
-            // manual-refresh mode.
-            appState.prepareWeekNeighbors(userInitiated: false)
+            // Only the explicit on-open mode may perform network work here.
+            // Interval mode never starts network work from presentation.
+            await appState.popoverDidOpen()
         }
     }
 

@@ -133,8 +133,12 @@ struct DisplaySettings: Hashable, Codable, Sendable {
     static let refreshIntervalRange: ClosedRange<Int> = 5...240
     static let defaultRefreshIntervalMinutes = 15
 
-    /// Passive (non-user-initiated) fetches — popover open, day rollover,
-    /// week-neighbor prep — happen in every mode except manual.
+    /// Foreground activation and popover presentation refresh data only when
+    /// the user explicitly chooses the on-open mode.
+    var refreshesOnOpen: Bool { refreshMode == .onOpen }
+
+    /// Other passive fetches, such as day rollover and interval-refresh
+    /// follow-up work, happen in every mode except manual.
     var allowsPassiveFetch: Bool { refreshMode != .manual }
 
     init() {}

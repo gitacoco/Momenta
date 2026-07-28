@@ -66,7 +66,7 @@ struct RefreshLifecycleTests {
 
     // MARK: Throttling
 
-    @Test func popoverOpensWithinIntervalReuseLastFetch() async {
+    @Test func onOpenModeReusesLastFetchWithinThrottleWindow() async {
         let provider = CountingProvider()
         let appState = AppState(
             provider: provider,
@@ -76,10 +76,65 @@ struct RefreshLifecycleTests {
             defaults: freshDefaults(),
             autoRefresh: false
         )
-        await appState.refreshIfNeeded()
-        await appState.refreshIfNeeded()
-        await appState.refreshIfNeeded()
+        appState.displaySettings.refreshMode = .onOpen
+        await appState.popoverDidOpen()
+        await appState.popoverDidOpen()
+        await appState.popoverDidOpen()
         #expect(provider.snapshotLoads == 1)
+    }
+
+    @Test func intervalModeStillRefreshesAtLaunch() async {
+        let provider = CountingProvider()
+        let appState = AppState(
+            provider: provider,
+            account: disconnectedAccount(),
+            config: ConfigStore(defaults: freshDefaults()),
+            snapshotCache: tempCache(),
+            defaults: freshDefaults(),
+            autoRefresh: false
+        )
+        appState.displaySettings.refreshMode = .interval
+        appState.displaySettings.refreshIntervalMinutes = 10
+
+        await appState.refreshAtLaunchIfNeeded()
+
+        #expect(provider.snapshotLoads == 1)
+    }
+
+    @Test func intervalModeDoesNotRefreshWhenPopoverOpens() async {
+        let provider = CountingProvider()
+        let appState = AppState(
+            provider: provider,
+            account: disconnectedAccount(),
+            config: ConfigStore(defaults: freshDefaults()),
+            snapshotCache: tempCache(),
+            defaults: freshDefaults(),
+            autoRefresh: false
+        )
+        appState.displaySettings.refreshMode = .interval
+        appState.displaySettings.refreshIntervalMinutes = 10
+
+        await appState.popoverDidOpen()
+
+        #expect(provider.snapshotLoads == 0)
+    }
+
+    @Test func intervalModeDoesNotRefreshWhenApplicationBecomesActive() async {
+        let provider = CountingProvider()
+        let appState = AppState(
+            provider: provider,
+            account: disconnectedAccount(),
+            config: ConfigStore(defaults: freshDefaults()),
+            snapshotCache: tempCache(),
+            defaults: freshDefaults(),
+            autoRefresh: false
+        )
+        appState.displaySettings.refreshMode = .interval
+        appState.displaySettings.refreshIntervalMinutes = 10
+
+        await appState.applicationDidBecomeActive()
+
+        #expect(provider.snapshotLoads == 0)
     }
 
     @Test func manualRefreshBypassesThrottle() async {
