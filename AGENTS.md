@@ -60,3 +60,4 @@ For SwiftUI/AppKit boundary bugs, native macOS interaction bugs, and other behav
 - Preserve unrelated user changes in a dirty working tree; stage only files that belong to the current task.
 - Commit completed, verified changes locally by default with an English commit message.
 - Push completed, verified commits by default unless the user explicitly asks to keep them local.
+- After replacing or rebuilding a local Momenta app, quit the old Momenta process and launch the newly built configuration by default; do not ask the user to restart it manually.
