@@ -649,17 +649,23 @@ final class AppState {
         return "No data fetched for this month yet."
     }
 
-    /// The status item's aggregate, always at the shared clock. Week routes
-    /// through the unified slice path; an incomplete week publishes nothing
-    /// (the label renders its explicit empty state) rather than a partial
-    /// number.
+    /// The status item's aggregate, at whichever period the popover is
+    /// showing. Following the reference rather than the clock keeps the two
+    /// surfaces from disagreeing while both are on screen; the reference can
+    /// only be historical while the popover is open, because closing it
+    /// resets to now, so the status item is never left on a past value with
+    /// nothing visible to explain it.
+    ///
+    /// Week routes through the unified slice path; an incomplete week
+    /// publishes nothing (the label renders its explicit empty state) rather
+    /// than a partial number.
     var menuBarAggregate: AggregateProgress? {
         switch displaySettings.aggregationPeriod {
         case .week:
-            guard case .complete(let week) = weekDataState(at: displayNow) else { return nil }
+            guard case .complete(let week) = weekDataState(at: activeReference) else { return nil }
             return week.aggregate
         case .day, .month:
-            return singleMonthAggregate(at: displayNow)
+            return singleMonthAggregate(at: activeReference)
         }
     }
 

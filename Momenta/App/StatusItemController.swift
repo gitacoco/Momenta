@@ -235,6 +235,11 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
     func popoverDidClose(_ notification: Notification) {
         removeDismissMonitors()
         closeAnchorWindow()
+        // History browsing is scoped to a viewing session. The status item
+        // stays pinned to now, so a reference left behind would be invisible
+        // state: the next open would show a past period with nothing in the
+        // menu bar to explain it. Closing ends the session.
+        appState.resetReferenceToNow()
     }
 
     private func showContextMenu(with event: NSEvent) {

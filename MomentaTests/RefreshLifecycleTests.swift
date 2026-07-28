@@ -601,6 +601,35 @@ struct WeekUnificationTests {
         #expect(appState.selectedReference == nil)
     }
 
+    @Test func menuBarFollowsTheSteppedReferenceRatherThanTheClock() async {
+        let appState = makeAppState(provider: MockDataProvider())
+        appState.displayNow = midMonth(appState)
+        await appState.refresh()
+        appState.displaySettings.aggregationPeriod = .day
+
+        let live = appState.menuBarAggregate
+        appState.stepBackward()
+
+        guard case .complete(let popover) = appState.popoverData(),
+              let popoverOverall = popover.overall,
+              let stepped = appState.menuBarAggregate else {
+            Issue.record("expected complete day data on both surfaces")
+            return
+        }
+        // The status item shows what the popover shows, not what the clock
+        // says — the two surfaces are on screen together while browsing.
+        #expect(stepped.actualHours == popoverOverall.actualHours)
+        #expect(stepped.targetHours == popoverOverall.targetHours)
+        #expect(stepped.actualRevenue == popoverOverall.actualRevenue)
+        #expect(stepped.actualHours != live?.actualHours || stepped.targetHours != live?.targetHours)
+
+        // Closing the popover resets the reference, so the status item is
+        // never left on a past value once the popover is gone.
+        appState.resetReferenceToNow()
+        #expect(appState.menuBarAggregate?.actualHours == live?.actualHours)
+        #expect(appState.menuBarAggregate?.targetHours == live?.targetHours)
+    }
+
     @Test func clockJumpAcrossMonthResyncsSelectedMonth() async {
         let appState = makeAppState(provider: MockDataProvider())
         appState.displayNow = midMonth(appState)
