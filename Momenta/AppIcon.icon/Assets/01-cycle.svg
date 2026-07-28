@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg"
+     width="1024"
+     height="1024"
+     viewBox="0 0 1024 1024">
+  <title>Momenta growth cycle</title>
+  <path d="M 608 334 A 246 246 0 1 1 416 334"
+        fill="none"
+        stroke="#FFFFFF"
+        stroke-width="100"
+        stroke-linecap="round"/>
+</svg>

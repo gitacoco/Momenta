@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg"
+     width="1024"
+     height="1024"
+     viewBox="0 0 1024 1024">
+  <title>Momenta sprouting progress</title>
+  <path d="M 608 334 C 621 306 639 276 671 250"
+        fill="none"
+        stroke="#FFFFFF"
+        stroke-width="64"
+        stroke-linecap="round"/>
+  <path d="M 643 292
+           C 600 242 536 237 494 274
+           C 530 328 592 338 643 292 Z"
+        fill="#FFFFFF"/>
+  <path d="M 663 260
+           C 701 196 772 184 822 225
+           C 793 288 733 310 663 260 Z"
+        fill="#FFFFFF"/>
+</svg>
