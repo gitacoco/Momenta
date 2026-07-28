@@ -5,8 +5,14 @@ import UniformTypeIdentifiers
 /// client list, enable switches, and drag-to-reorder behavior without acting
 /// as another navigation column.
 struct ClientSelectorView: View {
+    private enum FocusTarget: Hashable {
+        case refresh
+    }
+
     @Environment(AppState.self) private var appState
     @Binding var selectedClientID: Int?
+    let onMoveFocusToDetail: (Int) -> Void
+    @FocusState private var focusedControl: FocusTarget?
 
     var body: some View {
         Group {
@@ -163,6 +169,14 @@ struct ClientSelectorView: View {
         }
         .buttonStyle(.borderless)
         .disabled(appState.clientListLoading || !appState.account.isConnected)
+        .focused($focusedControl, equals: .refresh)
+        .onKeyPress(.tab, phases: [.down]) { keyPress in
+            guard !keyPress.modifiers.contains(.shift),
+                  let selectedClientID
+            else { return .ignored }
+            onMoveFocusToDetail(selectedClientID)
+            return .handled
+        }
     }
 
     private func clientRow(_ client: ClientConfig) -> some View {
@@ -183,6 +197,14 @@ struct ClientSelectorView: View {
                 .toggleStyle(.switch)
                 .controlSize(.mini)
                 .labelsHidden()
+                .onKeyPress(.tab, phases: [.down]) { keyPress in
+                    guard !keyPress.modifiers.contains(.shift) else {
+                        return .ignored
+                    }
+                    selectedClientID = client.id
+                    focusedControl = .refresh
+                    return .handled
+                }
         }
         .frame(minHeight: 34)
         .opacity(client.isEnabled ? 1 : 0.6)
@@ -220,6 +242,7 @@ struct ClientSelectorView: View {
 struct ClientDetailColumn: View {
     @Environment(AppState.self) private var appState
     let selectedClientID: Int?
+    var focusedField: FocusState<ClientField?>.Binding
 
     private var isMultiWorkspace: Bool {
         Set(appState.config.clients.map(\.workspaceID)).count > 1
@@ -228,7 +251,11 @@ struct ClientDetailColumn: View {
     var body: some View {
         ZStack {
             if let id = selectedClientID, let client = appState.config.client(id: id) {
-                ClientDetailView(client: client, showsWorkspace: isMultiWorkspace)
+                ClientDetailView(
+                    client: client,
+                    showsWorkspace: isMultiWorkspace,
+                    focusedField: focusedField
+                )
                     .id(id) // reset editor state when switching clients
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             } else {
@@ -255,11 +282,16 @@ private struct ClientDetailView: View {
     @State private var draft: GoalDraft
     @State private var showLogoImporter = false
     @State private var logoImportError: String?
-    @FocusState private var focusedField: ClientField?
+    var focusedField: FocusState<ClientField?>.Binding
 
-    init(client: ClientConfig, showsWorkspace: Bool) {
+    init(
+        client: ClientConfig,
+        showsWorkspace: Bool,
+        focusedField: FocusState<ClientField?>.Binding
+    ) {
         self.client = client
         self.showsWorkspace = showsWorkspace
+        self.focusedField = focusedField
         let month = YearMonth(containing: Date(), timeZone: .current)
         _draft = State(initialValue: Self.makeDraft(for: client, month: month))
     }
@@ -294,7 +326,7 @@ private struct ClientDetailView: View {
                         .textFieldStyle(.plain)
                         .frame(minWidth: 120, idealWidth: 220, maxWidth: 220)
                         .multilineTextAlignment(.trailing)
-                        .focused($focusedField, equals: .displayName)
+                        .focused(focusedField, equals: .displayName)
                         .labelsHidden()
                 }
                 logoRow
@@ -318,7 +350,7 @@ private struct ClientDetailView: View {
                                 .textFieldStyle(.plain)
                                 .multilineTextAlignment(.trailing)
                                 .frame(minWidth: 56, idealWidth: 70, maxWidth: 70)
-                                .focused($focusedField, equals: .rate)
+                                .focused(focusedField, equals: .rate)
                                 .labelsHidden()
                             Picker("Currency", selection: currencyBinding) {
                                 ForEach(currencyOptions, id: \.self) { code in
@@ -340,7 +372,7 @@ private struct ClientDetailView: View {
                     .foregroundStyle(.secondary)
                 }
             } else {
-                GoalEditorSection(client: client, draft: $draft, focus: $focusedField)
+                GoalEditorSection(client: client, draft: $draft, focus: focusedField)
             }
 
             pacingSection
@@ -490,7 +522,7 @@ private struct ClientDetailView: View {
     /// Each unmet requirement is a link that focuses the matching field.
     private func setupItem(_ text: String, target: ClientField) -> some View {
         Button {
-            focusedField = target
+            focusedField.wrappedValue = target
         } label: {
             HStack(spacing: 5) {
                 Image(systemName: "arrow.forward.circle")

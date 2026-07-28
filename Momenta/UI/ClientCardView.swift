@@ -716,6 +716,17 @@ struct ClientCardView: View {
         .help("Edit \(client.displayName) goal")
         .accessibilityLabel("Edit goal, \(goalChipText ?? "not set")")
         .accessibilityHint("Opens this client's goal settings")
+        // The custom capsule ButtonStyle receives focus on macOS but does not
+        // inherit the standard Space/Return activation behavior. Keep the
+        // bespoke visual treatment while restoring normal keyboard semantics.
+        .onKeyPress(.space) {
+            onEditGoal()
+            return .handled
+        }
+        .onKeyPress(.return) {
+            onEditGoal()
+            return .handled
+        }
     }
 
     /// The goal chip shows the period's target: the whole-month goal for month,

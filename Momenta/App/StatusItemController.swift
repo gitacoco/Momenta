@@ -33,9 +33,38 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
         popover.contentViewController = hostingController
 
         if let button = statusItem.button {
+            // The embedded hosting view supplies the pixels, but macOS exposes
+            // the outer NSStatusBarButton to menu-bar keyboard navigation.
+            // Describe that real action element directly instead of leaving it
+            // as an unnamed AXUnknown container.
+            button.setAccessibilityElement(true)
+            button.setAccessibilityRole(.button)
+            button.setAccessibilityLabel("Momenta")
+            button.setAccessibilityHelp("Open dashboard")
+            button.setAccessibilityIdentifier("momenta.status-item")
+            button.setAccessibilityValue(
+                MenuBarPresentation(
+                    aggregate: appState.menuBarAggregate,
+                    settings: appState.displaySettings,
+                    unit: appState.displayUnit
+                ).accessibilityValue
+            )
+            button.setAccessibilityCustomActions([
+                NSAccessibilityCustomAction(
+                    name: "Open dashboard",
+                    target: self,
+                    selector: #selector(openDashboardAccessibilityAction)
+                )
+            ])
+
             // SwiftUI renders the label so it live-updates with app state.
             let hosting = NSHostingView(
-                rootView: MenuBarLabelContainer().environment(appState)
+                rootView: MenuBarLabelContainer(
+                    accessibilityValueChanged: { [weak button] value in
+                        button?.setAccessibilityValue(value)
+                    }
+                )
+                .environment(appState)
             )
             hosting.sizingOptions = [.intrinsicContentSize]
             hosting.setContentHuggingPriority(.required, for: .horizontal)
@@ -85,6 +114,11 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
         } else if event.type == .leftMouseUp {
             togglePopover()
         }
+    }
+
+    @objc private func openDashboardAccessibilityAction() -> Bool {
+        togglePopover()
+        return true
     }
 
     private func togglePopover() {
@@ -399,6 +433,15 @@ private final class PopoverAnchorView: NSView {
 /// Thin wrapper so the status item label participates in SwiftUI observation.
 private struct MenuBarLabelContainer: View {
     @Environment(AppState.self) private var appState
+    let accessibilityValueChanged: (String) -> Void
+
+    private var accessibilityValue: String {
+        MenuBarPresentation(
+            aggregate: appState.menuBarAggregate,
+            settings: appState.displaySettings,
+            unit: appState.displayUnit
+        ).accessibilityValue
+    }
 
     var body: some View {
         // No local clock: the label re-renders when the shared displayNow (or
@@ -416,5 +459,11 @@ private struct MenuBarLabelContainer: View {
         .padding(.trailing, 5)
         .fixedSize(horizontal: true, vertical: false)
         .allowsHitTesting(false)
+        .onAppear {
+            accessibilityValueChanged(accessibilityValue)
+        }
+        .onChange(of: accessibilityValue) { _, newValue in
+            accessibilityValueChanged(newValue)
+        }
     }
 }

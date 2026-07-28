@@ -35,6 +35,7 @@ struct SettingsView: View {
     @State private var isApplyingHistory = false
     @State private var selectedClientID: Int?
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
+    @FocusState private var clientDetailFocus: ClientField?
 
     private let primarySidebarWidth: CGFloat = 180
     private let clientSelectorWidth: CGFloat = 240
@@ -94,7 +95,13 @@ struct SettingsView: View {
     /// cannot resize, collapse, or disturb the persistent primary sidebar.
     private var clientsWorkspace: some View {
         HStack(spacing: 0) {
-            ClientSelectorView(selectedClientID: $selectedClientID)
+            ClientSelectorView(
+                selectedClientID: $selectedClientID,
+                onMoveFocusToDetail: { clientID in
+                    selectedClientID = clientID
+                    clientDetailFocus = .displayName
+                }
+            )
                 .frame(width: clientSelectorWidth)
                 .frame(maxHeight: .infinity)
                 .background(Color(nsColor: .controlBackgroundColor))
@@ -112,7 +119,10 @@ struct SettingsView: View {
             // page's minimums exceed the window minimum, which makes SwiftUI
             // overflow the whole split container 2 pt past each window edge —
             // visibly shifting the sidebar and toolbar left on navigation.
-            ClientDetailColumn(selectedClientID: selectedClientID)
+            ClientDetailColumn(
+                selectedClientID: selectedClientID,
+                focusedField: $clientDetailFocus
+            )
                 .frame(minWidth: 476, maxWidth: .infinity, maxHeight: .infinity)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)

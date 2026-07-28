@@ -127,6 +127,27 @@ struct DashboardView: View {
             .pickerStyle(.segmented)
             .labelsHidden()
             .fixedSize()
+            // SwiftUI exposes the selected segment as the single Tab stop on
+            // macOS, but its generated segmented control does not move between
+            // the image-only segments with the arrow keys. Handle the standard
+            // group-navigation keys explicitly so both values remain keyboard
+            // operable without adding another Tab stop.
+            .onKeyPress(.leftArrow) {
+                appState.displayUnit = .hours
+                return .handled
+            }
+            .onKeyPress(.rightArrow) {
+                appState.displayUnit = .revenue
+                return .handled
+            }
+            .onKeyPress(.upArrow) {
+                appState.displayUnit = .hours
+                return .handled
+            }
+            .onKeyPress(.downArrow) {
+                appState.displayUnit = .revenue
+                return .handled
+            }
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
