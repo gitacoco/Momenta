@@ -263,10 +263,13 @@ private struct AnimatedPeriodChartHost<Content: View>: View {
         }
 
         #if DEBUG
-        print(
-            "[PeriodChart] animate \(previous.period.rawValue) -> \(next.period.rawValue), "
-            + "x: \(previous.xDomain) -> \(next.xDomain), "
-            + "y: \(previous.yUpperBound) -> \(next.yUpperBound)"
+        // Temporary latency instrumentation: how long the deliberate one-turn
+        // deferral between mounting the union and starting the zoom actually
+        // takes. ~16ms is the designed single frame; substantially more means
+        // the union-mount frame (or other main-actor work) is starving it.
+        let switchBegan = ProcessInfo.processInfo.systemUptime
+        ChartTransitionLog.append(
+            "onChange \(previous.period.rawValue) -> \(next.period.rawValue)"
         )
         #endif
 
@@ -301,15 +304,51 @@ private struct AnimatedPeriodChartHost<Content: View>: View {
             })
         }
 
+        #if DEBUG
+        ChartTransitionLog.append(String(
+            format: "phase1 committed +%.1fms mode=%@",
+            (ProcessInfo.processInfo.systemUptime - switchBegan) * 1000,
+            RunLoop.current.currentMode?.rawValue ?? "nil"
+        ))
+        // Control probe: a bare dispatch hop alongside the phase-2 race. If a
+        // stall recurs with phase2 via=runloop fast and this line ~1s late,
+        // the dispatch drain specifically is what stalls.
+        DispatchQueue.main.async {
+            ChartTransitionLog.append(String(
+                format: "  gcd-main      +%.1fms mode=%@",
+                (ProcessInfo.processInfo.systemUptime - switchBegan) * 1000,
+                RunLoop.current.currentMode?.rawValue ?? "nil"
+            ))
+        }
+        #endif
+
         transitionGeneration += 1
         let generation = transitionGeneration
         let activeX = Set(nextX.map(\.id))
         let activeY = Set(nextY.map(\.id))
-        Task { @MainActor in
-            guard generation == transitionGeneration else { return }
-            // Phase 2: the zoom itself. Every union mark keeps its day, so
-            // the domain change re-projects the shared window across the
-            // plot while values animate to the incoming period's baseline.
+
+        // Phase 2 must start on the runloop turn after the mount, but a lone
+        // main-actor hop has intermittently started ~1s late with the main
+        // thread otherwise idle (period switches into week; see the DEBUG
+        // transition log). Until that scheduling stall is understood, the
+        // start races two independent wake-up paths — a common-modes runloop
+        // perform and a main-actor Task — first arrival wins, the other
+        // no-ops via `phase2Started`.
+        let phase2Started = MutableFlag()
+        let startPhase2: @MainActor (String) -> Void = { route in
+            guard generation == transitionGeneration, !phase2Started.value else { return }
+            phase2Started.value = true
+            #if DEBUG
+            ChartTransitionLog.append(String(
+                format: "phase2 begin   +%.1fms via=%@ mode=%@",
+                (ProcessInfo.processInfo.systemUptime - switchBegan) * 1000,
+                route,
+                CFRunLoopCopyCurrentMode(CFRunLoopGetMain()).map { $0.rawValue as String } ?? "nil"
+            ))
+            #endif
+            // The zoom itself. Every union mark keeps its day, so the domain
+            // change re-projects the shared window across the plot while
+            // values animate to the incoming period's baseline.
             withAnimation(.easeInOut(duration: 0.48)) {
                 rendered = union.end
                 for index in xTicks.indices {
@@ -330,6 +369,14 @@ private struct AnimatedPeriodChartHost<Content: View>: View {
                     yTicks.removeAll { !$0.isActive }
                 }
             }
+        }
+        RunLoop.main.perform(inModes: [.common]) {
+            MainActor.assumeIsolated {
+                startPhase2("runloop")
+            }
+        }
+        Task { @MainActor in
+            startPhase2("task")
         }
     }
 
@@ -1174,6 +1221,35 @@ private struct GoalChipButtonStyle: ButtonStyle {
         return isHovered ? 0.1 : 0
     }
 }
+
+/// A main-thread-only mutable box, so the two racing phase-2 starters can
+/// share "already ran" across their escaping closures.
+@MainActor
+private final class MutableFlag {
+    var value = false
+}
+
+#if DEBUG
+/// Temporary instrumentation for the period-switch latency investigation.
+/// Writes to the sandbox tmp directory because the app is launched via
+/// `open`, where print() output goes nowhere.
+enum ChartTransitionLog {
+    static func append(_ line: String) {
+        let url = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("momenta-chart-transition.log")
+        let stamped = String(
+            format: "[%.3f] %@\n", ProcessInfo.processInfo.systemUptime, line
+        )
+        if let handle = try? FileHandle(forWritingTo: url) {
+            handle.seekToEndOfFile()
+            handle.write(Data(stamped.utf8))
+            try? handle.close()
+        } else {
+            try? Data(stamped.utf8).write(to: url)
+        }
+    }
+}
+#endif
 
 extension Color {
     /// Parses "#RRGGBB"; falls back to accentColor on malformed input.
