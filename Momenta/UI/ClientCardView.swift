@@ -567,17 +567,23 @@ struct ClientCardView: View {
         case .day(let slice):
             // The timeline compares against the plan-at-now (the work-window
             // ramp), not the whole-day pace: a morning before work starts is
-            // on pace, not behind.
-            if isTimelineDay, let expected = timelineExpectedAtNow(slice) {
+            // on pace, not behind. Gated on the timeline actually being drawn
+            // so the badge's colour always reads the same curve the user sees.
+            if drawsDayTimeline, let expected = timelineExpectedAtNow(slice) {
                 return slice.actualHours >= expected.hours
             }
             return slice.isAhead
         }
     }
 
-    private var isTimelineDay: Bool {
-        if case .day = data { return dayStyle == .timeline }
-        return false
+    /// Whether the day card draws its intraday timeline. A rest day never
+    /// does: with no ramp to plot and no hours to accumulate it would be a
+    /// flat zero line under a placeholder 0–1 axis, saying less than the
+    /// "Day off" state both styles already share. The single gate keeps the
+    /// chart model and the layout from disagreeing about what is drawn.
+    private var drawsDayTimeline: Bool {
+        guard case .day(let slice) = data else { return false }
+        return dayStyle == .timeline && !slice.isRestDay && !slice.points.isEmpty
     }
 
     private var clientColor: Color {
@@ -644,7 +650,7 @@ struct ClientCardView: View {
 
     private var bodyIsChart: Bool {
         switch data {
-        case .day(let slice): return isTimelineDay && !slice.points.isEmpty
+        case .day: return drawsDayTimeline
         case .month, .week: return true
         }
     }
@@ -737,11 +743,7 @@ struct ClientCardView: View {
                 )
             )
         case .day(let slice):
-            if isTimelineDay, !slice.points.isEmpty {
-                makeDayChartModel(slice)
-            } else {
-                nil
-            }
+            drawsDayTimeline ? makeDayChartModel(slice) : nil
         }
     }
 
