@@ -8,6 +8,11 @@ private enum MenuBarMetrics {
     static var glyphSize: CGFloat {
         ceil(NSFont.menuBarFont(ofSize: 0).boundingRectForFont.height)
     }
+
+    /// Stepping the popover's period moves this label too. Short and eased so
+    /// the change registers as the same value being re-dialled, without the
+    /// menu bar drawing attention to itself the way a longer motion would.
+    static let valueChange: Animation = .easeOut(duration: 0.28)
 }
 
 /// Pure presentation data shared by the real status item, Settings preview,
@@ -164,6 +169,12 @@ struct MenuBarLabel: View {
                             Text(percentage)
                                 .font(.system(size: 11).monospacedDigit())
                                 .foregroundStyle(.primary)
+                                // Digit-count changes resize the status item,
+                                // which slides everything rigidly — fine. The
+                                // glyphs' geometryGroup is what keeps their
+                                // fills from shearing against their tracks.
+                                .contentTransition(.numericText())
+                                .animation(MenuBarMetrics.valueChange, value: percentage)
                         }
                     }
                 }
@@ -234,15 +245,17 @@ private struct RingProgressGlyph: View {
             Circle()
                 .stroke(Color.primary.opacity(trackOpacity), lineWidth: 2)
 
-            if clampedFraction > 0 {
-                Circle()
-                    .trim(from: 0, to: clampedFraction)
-                    .stroke(
-                        Color.primary,
-                        style: StrokeStyle(lineWidth: 2, lineCap: .round)
-                    )
-                    .rotationEffect(.degrees(-90))
-            }
+            // Always mounted, even at zero: inserting the arc on the first
+            // non-zero value would pop it in at full length instead of
+            // sweeping there from the track.
+            Circle()
+                .trim(from: 0, to: clampedFraction)
+                .stroke(
+                    Color.primary,
+                    style: StrokeStyle(lineWidth: 2, lineCap: .round)
+                )
+                .rotationEffect(.degrees(-90))
+                .animation(MenuBarMetrics.valueChange, value: clampedFraction)
 
             if let monogram {
                 Text(monogram)
@@ -251,6 +264,13 @@ private struct RingProgressGlyph: View {
                     .minimumScaleFactor(0.7)
             }
         }
+        // The fill's `.animation(value:)` would otherwise also capture
+        // layout-imposed position changes arriving in the same transaction
+        // (label text widening, a ring appearing), easing the arc sideways
+        // while the un-animated track snaps — the two halves of one glyph
+        // visibly shearing apart. Grouping applies external geometry to the
+        // whole glyph atomically; only the trim animates.
+        .geometryGroup()
         .frame(width: MenuBarMetrics.glyphSize, height: MenuBarMetrics.glyphSize)
         .accessibilityHidden(true)
     }
@@ -272,23 +292,47 @@ private struct WaterlineProgressGlyph: View {
     }
 
     var body: some View {
-        GeometryReader { proxy in
-            let rawHeight = proxy.size.height * clampedFraction
-            let pixelAlignedHeight = (rawHeight * displayScale).rounded(.down) / displayScale
+        ZStack(alignment: .bottom) {
+            Capsule()
+                .fill(Color.primary.opacity(trackOpacity))
 
-            ZStack(alignment: .bottom) {
-                Capsule()
-                    .fill(Color.primary.opacity(trackOpacity))
-
-                if pixelAlignedHeight > 0 {
-                    Rectangle()
-                        .fill(Color.primary)
-                        .frame(height: pixelAlignedHeight)
-                }
-            }
-            .clipShape(Capsule())
+            // A shape, not an animated `frame(height:)`: the fill's top edge
+            // has to land on a device pixel in every frame of the animation,
+            // not just at its endpoints. Interpolating the height directly
+            // walks it through fractional pixels, and the antialiasing that
+            // produces reads as a shimmering edge at menu-bar scale.
+            WaterlineFill(fraction: clampedFraction, displayScale: displayScale)
+                .fill(Color.primary)
+                .animation(MenuBarMetrics.valueChange, value: clampedFraction)
         }
+        .clipShape(Capsule())
+        // Same shear protection as the ring: external position changes move
+        // fill and track as one, only the water level animates.
+        .geometryGroup()
         .frame(width: 4, height: MenuBarMetrics.glyphSize)
         .accessibilityHidden(true)
+    }
+}
+
+/// The waterline's filled portion, measured from the bottom. `fraction` is the
+/// animatable quantity, so the height is re-derived and snapped to whole
+/// device pixels on every interpolated frame — the fill steps up a pixel at a
+/// time and stays crisp instead of sliding through fractional positions.
+private struct WaterlineFill: Shape {
+    var fraction: Double
+    let displayScale: CGFloat
+
+    var animatableData: Double {
+        get { fraction }
+        set { fraction = newValue }
+    }
+
+    func path(in rect: CGRect) -> Path {
+        let raw = rect.height * min(max(fraction, 0), 1)
+        let aligned = (raw * displayScale).rounded(.down) / displayScale
+        guard aligned > 0 else { return Path() }
+        return Path(
+            CGRect(x: rect.minX, y: rect.maxY - aligned, width: rect.width, height: aligned)
+        )
     }
 }
