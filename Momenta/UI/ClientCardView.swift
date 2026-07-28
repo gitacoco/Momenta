@@ -68,11 +68,15 @@ private enum PeriodChartAxis {
         markerFont.ascender - markerFont.descender + markerFont.leading
     )
     static let markerSpacing: CGFloat = 4
-    /// PointMark's symbol size is 36 pt², so its rendered diameter is 6 pt.
-    static let markerRequiredClearance = markerLabelHeight + 3 + markerSpacing
+    static let markerSymbolArea: CGFloat = 36
+    /// Swift Charts expresses symbol size as area, so the 36 pt² circular mark
+    /// has a radius of √(36/π), not 3 pt.
+    static let markerRadius = sqrt(markerSymbolArea / .pi)
+    static let markerRequiredClearance = markerLabelHeight + markerRadius + markerSpacing
     /// Keeps boundary-centered marks whole while still clipping transition
-    /// union marks once they move more than a symbol radius off the plot.
-    static let plotClipBleed: CGFloat = 3
+    /// union marks once they move more than a symbol radius off the plot. The
+    /// ceiling preserves the circular mark's antialiased fringe.
+    static let plotClipBleed = ceil(markerRadius)
 
     static func labelWidth(_ label: String) -> CGFloat {
         ceil((label as NSString).size(withAttributes: [.font: labelFont]).width)
@@ -869,7 +873,7 @@ struct ClientCardView: View {
                 )
                 // The annotation anchors here, so a zero-size symbol keeps the
                 // value label while hiding the dot on past periods.
-                .symbolSize(isCurrentPeriod ? 36 : 0)
+                .symbolSize(isCurrentPeriod ? PeriodChartAxis.markerSymbolArea : 0)
                 .foregroundStyle(clientColor)
                 .annotation(
                     position: markerAnnotationPosition(
