@@ -70,6 +70,9 @@ private enum PeriodChartAxis {
     static let markerSpacing: CGFloat = 4
     /// PointMark's symbol size is 36 pt², so its rendered diameter is 6 pt.
     static let markerRequiredClearance = markerLabelHeight + 3 + markerSpacing
+    /// Keeps boundary-centered marks whole while still clipping transition
+    /// union marks once they move more than a symbol radius off the plot.
+    static let plotClipBleed: CGFloat = 3
 
     static func labelWidth(_ label: String) -> CGFloat {
         ceil((label as NSString).size(withAttributes: [.font: labelFont]).width)
@@ -170,8 +173,9 @@ private struct AnimatedPeriodChartHost<Content: View>: View {
         let plotHeight = max(size.height - PeriodChartAxis.xGutterHeight, 1)
 
         // Each layer clips to its own region — the plot for marks and
-        // gridlines, the gutters for labels — so nothing the zoom pushes past
-        // a coordinate-system boundary is drawn outside it.
+        // gridlines, the gutters for labels. The chart alone gets one marker
+        // radius of bleed so strokes and symbols centered exactly on a plot
+        // boundary stay whole; the zoom's farther-off union marks remain cut.
         ZStack(alignment: .topLeading) {
             ZStack(alignment: .topLeading) {
                 ForEach(yTicks) { tick in
@@ -189,7 +193,7 @@ private struct AnimatedPeriodChartHost<Content: View>: View {
             .clipped()
             content(rendered, plotHeight)
                 .frame(width: plotWidth, height: plotHeight)
-                .clipped()
+                .clipShape(Rectangle().inset(by: -PeriodChartAxis.plotClipBleed))
             ZStack(alignment: .topLeading) {
                 ForEach(yTicks) { tick in
                     axisLabel(tick.label)
