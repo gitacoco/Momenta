@@ -18,17 +18,17 @@ time entry.
 
 ## Highlights
 
-- **Progress in the menu bar.** Show overall progress, individual clients, or
-  both for today, this week, or this month.
-- **Two compact visual forms.** Choose rings or waterlines without spending
-  menu bar space on redundant percentages.
-- **A useful popover.** Compare planned and actual progress, see whether each
-  client is ahead or behind, and review the daily pace required to reach the
-  goal.
-- **Pacing that matches the engagement.** Spread a goal across weekdays only
-  or every calendar day.
-- **Historical goals.** Review earlier months against the goal and rate that
-  were recorded for that month.
+- **Progress in the menu bar.** Show Overall progress, individual clients, or
+  both for today, this week, or this month, using rings or waterlines.
+- **An honest daily target.** Today's goal is frozen at the start of the day,
+  while an optional intraday timeline ramps the plan only inside each client's
+  work hours.
+- **Flexible client goals.** Track billable work in hours or revenue,
+  hours-only non-billable work, custom workdays, monthly goal history, and
+  per-client branding.
+- **A useful dashboard.** Compare planned and actual progress, move through
+  earlier periods, switch between hours and revenue, and see exactly why data
+  is missing or stale.
 - **Offline continuity.** Keep the last successful snapshot visible when
   Toggl is unavailable or the Mac is offline.
 
@@ -53,47 +53,87 @@ from Xcode using the instructions in [Development](#development).
 
 ### To develop Momenta
 
-- Xcode 27 beta or later
+- Xcode 26.6 with the macOS 26 SDK (the currently verified toolchain)
 - Swift 6
-- An Apple Development signing identity for running a signed local build
+- Git
+- An Apple Development signing identity only if you want to run a signed local
+  build; unsigned command-line builds and tests do not require one
 
 The current project deployment target is macOS 26.0. The release and test
-commands below are verified with Xcode 27 beta on macOS 27.
+commands below are verified with Xcode 26.6 on macOS 27.
+
+## Get a Toggl API token
+
+Momenta uses your personal Toggl Track API token. It does not ask for or store
+your Toggl password.
+
+1. Sign in to [Toggl Track](https://track.toggl.com).
+2. Select your profile icon in the lower-left corner and open **Profile**.
+3. Scroll to the **API Token** section at the bottom of the Profile page.
+4. Copy the token. Toggl's
+   [token-location guide](https://support.toggl.com/en-us/article/where-is-my-api-key-located-e9ki6p/)
+   links directly to the current Profile page if the navigation changes.
+5. In Momenta, open **Settings → Account**, paste the token into
+   **Toggl API token**, and choose **Connect**.
+
+Momenta validates the token with Toggl before saving it as a generic password
+in the macOS Keychain. Treat the token like a password: do not put it in source
+code, terminal history, screenshots, logs, or bug reports. If it is exposed,
+reset it from the same Toggl Profile page; the previous token will stop working
+and Momenta will need to reconnect with the replacement.
 
 ## Quick start
 
-1. **Connect Toggl.** Open **Settings → Account**, paste the API token from
-   **Toggl Track → Profile → API Token**, then choose **Connect**. Momenta
-   validates the token before storing it in the macOS Keychain.
-2. **Choose clients.** Open **Settings → Clients**, refresh the client list,
+1. **Launch Momenta.** It appears in the menu bar and intentionally has no Dock
+   icon. Before an account is connected, the dashboard uses demo data.
+2. **Connect Toggl.** Open **Settings → Account**, paste the
+   [API token obtained above](#get-a-toggl-api-token), and choose **Connect**.
+3. **Choose clients.** Open **Settings → Clients**, refresh the client list,
    and enable the clients that should contribute to progress.
-3. **Set each goal.** Select an enabled client, enter its hourly rate and a
-   monthly goal in hours or revenue, then choose its pacing mode. Editing one
-   goal value updates the other using the hourly rate.
+4. **Configure each client.** Choose whether it is billable, then enter its
+   hourly rate when applicable, monthly goal, pacing days, and work hours.
+   A billable goal can be entered in hours or revenue; Momenta keeps the two
+   values in sync using the hourly rate.
+5. **Refresh and review.** Return to the menu-bar dashboard and choose
+   **Refresh**. Use the Day, Week, and Month controls to compare actual work
+   with the plan.
 
 Toggl entries must use a project that is linked to the intended Toggl client.
 Entries without a project, or whose project has no client, remain visible as
 uncategorized time instead of contributing to a client goal.
 
-After at least one enabled client has a complete rate and goal, choose
-**Refresh** to fetch a snapshot. The status item then begins showing progress.
+## Features
 
-## Display and pacing
+### Menu bar and dashboard
 
-### Menu bar
+Select the menu-bar item to open the dashboard. Secondary-click it to open a
+context menu with Settings, display controls, the last query time, Refresh, and
+Quit.
 
 Momenta exposes four independent display choices in **Settings → Display**.
-Content, period, and visualization are also available in the status item's
+Progress, period, and indicator style are also available from the menu-bar
 context menu:
 
 | Setting | Options | Meaning |
 | --- | --- | --- |
-| Content | Overall, By Client, Overall + Clients | Choose aggregate progress, individual client progress, or both. |
-| Period | Day, Week, Month | Compare today with the required revenue pace, or limit actual and planned progress to the current week/month. |
-| Visualization | Ring, Waterline | Change the compact progress glyph without changing the underlying value. |
+| Progress | Overall, By Client, Overall + Clients | Choose aggregate progress, individual client progress, or both. |
+| Period | Day, Week, Month | Show the current daily target or the selected week/month plan. |
+| Indicator style | Ring, Waterline | Change the compact progress glyph without changing the underlying value. |
 | Overall percentage | Off, On | Optionally show the numeric Overall percentage beside its indicator. |
 
-Overall progress is revenue-based because client hours with different rates
+The dashboard adds:
+
+- Back and forward navigation through earlier days, weeks, and months, plus a
+  **Back to Today** action.
+- An hours/revenue switch. Non-billable clients appear in hours mode and are
+  intentionally absent from revenue mode.
+- An Overall row and one card per enabled client, with setup, missing-data,
+  stale-cache, quota, and uncategorized-time states shown explicitly.
+- Direct links from incomplete cards to the corresponding client settings.
+
+### Period views and goal semantics
+
+Overall progress is revenue-based because hours billed at different rates
 cannot be summed meaningfully. Individual client cards can be viewed in hours
 or revenue.
 
@@ -108,29 +148,59 @@ Each client ring remains independent and uses that client's own goal for today,
 frozen the same way: its remaining monthly hours at the start of the day divided
 by its remaining scheduled days. Because today's own work never enters that
 denominator, the target holds still all day — yesterday's shortfall raises it and
-yesterday's surplus lowers it, but logging against it never moves it, and the day
-completes only when the work is actually done. Week and Month modes continue to
-use the planned share of the monthly goal for their selected calendar slice, and
-both cards lead with **/day to goal**: the live catch-up pace, which does fall as
-work is logged.
+yesterday's surplus lowers it, but logging against it never moves it. The day
+completes only when the work is actually done.
 
-### Pacing
+Day client cards have two styles, selected beside the period control in the
+Overall row:
 
-- **Weekdays only** assigns planned progress to Monday through Friday. The
-  planned line stays flat on weekends, so days off do not create artificial
-  debt.
-- **Every day** spreads the monthly goal across every calendar day.
+- **Capsule** compares today's accumulated work with the frozen daily goal.
+- **Timeline** plots cumulative actual work across 24 hours. Its plan is flat
+  before the client's work window, rises through that window, and stays flat
+  afterward. The ahead/behind result compares actual work with the plan at the
+  current time, so a morning before work starts does not read as debt.
 
-Pacing changes only the planned line and required daily pace. It never changes
-the Toggl entries counted as actual work.
+On a scheduled day off, both styles show **Day off** without a plan or artificial
+debt. Work logged on that day still counts as actual progress.
 
-### Refresh behavior
+**Week** and **Month** compare actual progress with the planned share of the
+monthly goal for the selected calendar interval. Both lead with
+**/day to goal**, the live catch-up pace required over the remaining scheduled
+days. Unlike the Day target, this forward-looking rate falls as work is logged.
+
+### Client configuration
+
+**Settings → Clients** imports clients from every visible Toggl workspace and
+groups them by workspace. For each client you can:
+
+- Enable or hide it without deleting its local configuration.
+- Override its display name, choose a brand color, and import or remove a logo.
+- Mark it billable or non-billable. Billable clients have a currency and hourly
+  rate; non-billable clients use hours-only goals.
+- Set a monthly goal in hours or revenue. Goal and rate changes are versioned
+  from the selected month onward so historical months retain their original
+  values.
+- Pace the goal over weekdays, every calendar day, or a custom set of weekdays.
+- Set the daily work window used by the Day timeline (default: 9:00–18:00).
+
+Clients archived in Toggl remain available for historical data, but their
+Momenta configuration becomes read-only.
+
+Pacing changes only planned progress and the required daily pace. It never
+changes which Toggl entries count as actual work.
+
+### Refresh and offline behavior
 
 **When the popover opens** refreshes on app launch, foreground activation, and
 popover presentation, with a one-minute throttle across those events. **On a
 set interval** refreshes once at app launch and then on the selected cadence;
 opening the popover does not fetch data. **Manually only** disables both
 automatic paths. The Refresh command always performs an immediate refresh.
+
+Momenta caches successful monthly snapshots locally. If Toggl is unavailable,
+the network is offline, or a quota is reached, the dashboard keeps the last
+snapshot visible and marks it as stale. It fetches the current month and the
+previous two months on demand; already cached older months remain navigable.
 
 ## Privacy and local data
 
@@ -142,7 +212,7 @@ at `https://api.track.toggl.com/api/v9`.
 | --- | --- |
 | Toggl API token | Stored as a generic password in the macOS Keychain. It is never written to UserDefaults, files, or logs. |
 | Account metadata | Name, email, organization plan metadata, workspace metadata, connection date, and last-sync date are stored locally in UserDefaults. |
-| Client preferences | Enabled state, display name, brand color, currency, pacing, hourly rate, and goal history are stored locally in UserDefaults. |
+| Client preferences | Enabled and billable state, display name, brand color, currency, pacing days, work hours, hourly rate, and goal history are stored locally in UserDefaults. |
 | Time-entry snapshots | The last successful monthly snapshots are stored as JSON in Momenta's sandboxed Application Support directory for offline viewing. A snapshot contains entry and client identifiers plus start and stop times, but not entry descriptions. |
 | Imported client logos | Copied into Momenta's sandboxed Application Support directory after explicit selection in the system file picker. |
 | Demo data | Generated deterministically and never written to the snapshot cache. |
@@ -202,8 +272,8 @@ quit it before opening another configuration.
 ### A client does not appear in progress
 
 Open **Settings → Clients** and confirm that the client is enabled and has a
-complete hourly rate and monthly goal for the selected month. Use **Refresh
-from Toggl** if the client was added or renamed recently.
+monthly goal for the selected month. A billable client also needs an hourly
+rate. Use **Refresh from Toggl** if the client was added or renamed recently.
 
 ### Data is stale or refresh reports an API quota error
 
@@ -226,11 +296,11 @@ and URL scheme, quit and remove obsolete copies when they are no longer needed.
 
 ### `xcodebuild` selects the wrong Xcode
 
-Point the command at the beta toolchain without changing the system-wide
+Point the command at the intended Xcode without changing the system-wide
 selection:
 
 ```sh
-DEVELOPER_DIR="/path/to/Xcode-beta.app/Contents/Developer" \
+DEVELOPER_DIR="/Applications/Xcode.app/Contents/Developer" \
   xcodebuild -version
 ```
 
@@ -243,15 +313,55 @@ reproduce the problem. Never include your Toggl API token in an issue.
 
 ## Development
 
-Clone the repository, then point each command at Xcode 27 beta. For example,
-if the beta is in `~/Downloads`:
+Momenta has no third-party package or bootstrap step. Clone the repository and
+open the shared Xcode project:
 
 ```sh
-export DEVELOPER_DIR="$HOME/Downloads/Xcode-beta.app/Contents/Developer"
+git clone https://github.com/gitacoco/Momenta.git
+cd Momenta
+open Momenta.xcodeproj
 ```
 
-Verify a Release build without depending on the repository owner's signing
-team:
+### Run from Xcode
+
+1. Select the **Momenta** scheme and **My Mac** destination.
+2. Open the Momenta target's **Signing & Capabilities** settings, keep
+   **Automatically manage signing** enabled, and select your development team.
+3. If your team cannot register `com.zhibangjiang.Momenta`, change the app's
+   bundle identifier to a unique reverse-DNS value for your local build.
+4. Choose **Product → Run** (`⌘R`). Momenta appears in the menu bar rather than
+   the Dock.
+
+The default build uses the standard sandbox, outbound-network, and
+user-selected-file entitlements. iCloud Sync is currently disabled, so a local
+build does not require the repository owner's CloudKit container.
+
+Keep one signing identity and bundle identifier while developing if you want
+Keychain access to remain stable across rebuilds. macOS can prompt again when a
+differently signed Debug or Release app requests the saved token.
+
+### Build and test from the command line
+
+Check the selected toolchain:
+
+```sh
+xcodebuild -version
+xcrun --sdk macosx --show-sdk-version
+```
+
+Build Debug without depending on the repository owner's signing team:
+
+```sh
+xcodebuild \
+  -project Momenta.xcodeproj \
+  -scheme Momenta \
+  -configuration Debug \
+  -destination 'platform=macOS' \
+  CODE_SIGNING_ALLOWED=NO \
+  build
+```
+
+Verify the optimized Release configuration the same way:
 
 ```sh
 xcodebuild \
@@ -263,7 +373,7 @@ xcodebuild \
   build
 ```
 
-Run the full test suite:
+Run the full unit-test suite:
 
 ```sh
 xcodebuild \
@@ -274,9 +384,14 @@ xcodebuild \
   test
 ```
 
-To run Momenta from Xcode, select your own development team for the Momenta
-target so the app and its Keychain access use a stable Apple Development
-identity.
+`CODE_SIGNING_ALLOWED=NO` is intended for build and test verification. For an
+interactive local app with stable Keychain access, configure signing in Xcode
+and run the Momenta scheme. Build products are placed in Xcode's DerivedData
+directory under `Build/Products/Debug` or `Build/Products/Release`.
+
+The current Release configuration uses an Apple Development identity. It is
+not a distributable release: public distribution still requires a Developer ID
+signature and notarization.
 
 ### Project layout
 
