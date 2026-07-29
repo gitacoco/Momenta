@@ -8,6 +8,23 @@ enum ClientField: Hashable {
     case revenue
 }
 
+/// Months the editor can address. Toggl only guarantees the current month and
+/// two previous months, so expose that window even before a refresh has filled
+/// `availableMonths`; cached and recorded older months remain selectable.
+enum GoalMonthOptions {
+    static func make(
+        current: YearMonth,
+        available: [YearMonth],
+        recorded: [YearMonth]
+    ) -> [YearMonth] {
+        Set(available)
+            .union(recorded)
+            .union([current.previous.previous, current.previous, current])
+            .filter { $0 <= current }
+            .sorted(by: >)
+    }
+}
+
 /// The goal half of the editor: hours and revenue side by side like a
 /// currency converter — edit either field and the other follows, using the
 /// rate from the Client Profile section. Saving writes a per-month goal
@@ -16,34 +33,79 @@ enum ClientField: Hashable {
 struct GoalEditorSection: View {
     @Environment(AppState.self) private var appState
     let client: ClientConfig
-    @Binding var draft: GoalDraft
+    @Binding var editor: GoalEditorState
     var focus: FocusState<ClientField?>.Binding
 
     @State private var showRetroDialog = false
+    @State private var showHistoricalSaveDialog = false
+    @State private var showUnsavedSwitchDialog = false
+    @State private var pendingMonth: YearMonth?
     @State private var savedFeedback = false
 
     private let converterFieldWidth: CGFloat = 140
 
     private var month: YearMonth {
-        appState.currentMonth
+        editor.month
+    }
+
+    private var draft: GoalDraft {
+        editor.draft
+    }
+
+    private var liveClient: ClientConfig {
+        appState.config.client(id: client.id) ?? client
+    }
+
+    private var monthOptions: [YearMonth] {
+        GoalMonthOptions.make(
+            current: appState.currentMonth,
+            available: appState.availableMonths,
+            recorded: Array(liveClient.goalHistory.keys)
+        )
+    }
+
+    private var isHistoricalMonth: Bool {
+        month < appState.currentMonth
+    }
+
+    /// Past months come from the account's navigable Toggl history as well as
+    /// goal versions retained beyond that API window. Looking only at goal
+    /// keys makes the retroactive action disappear for the exact first-goal
+    /// case where history needs to be backfilled.
+    private var historicalMonths: [YearMonth] {
+        monthOptions
+            .filter { $0 < appState.currentMonth }
+            .sorted()
     }
 
     private var hasHistoricalMonths: Bool {
-        client.goalHistory.keys.contains { $0 < month }
+        !historicalMonths.isEmpty
     }
 
     private var isDirty: Bool {
-        draft != GoalDraft(goal: client.goal(for: month), isBillable: client.isBillable)
+        editor.draft != GoalEditorState(client: liveClient, month: month).draft
     }
 
     var body: some View {
         Section {
+            LabeledContent("Goal month") {
+                Picker("Goal month", selection: monthBinding) {
+                    ForEach(monthOptions, id: \.self) { option in
+                        Text(Format.monthTitle(option, timeZone: appState.timeZone))
+                            .tag(option)
+                    }
+                }
+                .labelsHidden()
+                .fixedSize()
+                .accessibilityHint("Choose the month whose goal you want to edit")
+            }
+
             if !client.isBillable {
                 // Non-billable clients have no rate or revenue: a single hours
                 // target, as a standard label-left / field-right row.
                 LabeledContent("Hours") {
                     TextField("Hours", value: hoursBinding, format: .number.precision(.fractionLength(0...2)))
-                        .textFieldStyle(.plain)
+                        .textFieldStyle(.roundedBorder)
                         .multilineTextAlignment(.trailing)
                         .frame(minWidth: 56, idealWidth: 70, maxWidth: 70)
                         .focused(focus, equals: .hours)
@@ -100,15 +162,57 @@ struct GoalEditorSection: View {
             }
             .padding(.vertical, 2)
             }
+
+            if isHistoricalMonth {
+                HStack {
+                    Text("Past-month changes are saved only after confirmation.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Revert") {
+                        resetDraft()
+                    }
+                    .disabled(!isDirty)
+                    Button("Save \(Format.monthName(month, timeZone: appState.timeZone)) Goal…") {
+                        showHistoricalSaveDialog = true
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(!isDirty || draft.monthlyGoal == nil)
+                }
+            } else if hasHistoricalMonths {
+                HStack {
+                    Spacer()
+                    Button {
+                        showRetroDialog = true
+                    } label: {
+                        Label(
+                            "Apply \(Format.monthName(month, timeZone: appState.timeZone)) Goal to Past Months…",
+                            systemImage: "clock.arrow.circlepath"
+                        )
+                    }
+                    .buttonStyle(.borderless)
+                    .disabled(draft.monthlyGoal == nil && liveClient.goal(for: month) == nil)
+                    .help("Replace this client's rate and goal in every available past month")
+                    .accessibilityHint("Asks for confirmation before changing historical goals")
+                }
+            }
         } header: {
             HStack(alignment: .firstTextBaseline) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Monthly Goal")
-                    Text("Saves as you edit; changes apply from \(Format.monthTitle(month, timeZone: appState.timeZone)) onward.")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .textCase(nil)
-                        .fixedSize(horizontal: false, vertical: true)
+                    if isHistoricalMonth {
+                        Text("Editing \(Format.monthTitle(month, timeZone: appState.timeZone)); later months stay unchanged.")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .textCase(nil)
+                            .fixedSize(horizontal: false, vertical: true)
+                    } else {
+                        Text("Saves as you edit; changes apply from \(Format.monthTitle(month, timeZone: appState.timeZone)) onward.")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .textCase(nil)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
                 Spacer()
                 if savedFeedback {
@@ -117,22 +221,15 @@ struct GoalEditorSection: View {
                         .foregroundStyle(.green)
                         .transition(.opacity)
                 }
-                if hasHistoricalMonths {
-                    Menu {
-                        Button("Apply Current Goal to All Past Months…", role: .destructive) {
-                            showRetroDialog = true
-                        }
-                    } label: {
-                        Image(systemName: "ellipsis.circle")
-                    }
-                    .menuIndicator(.hidden)
-                    .fixedSize()
-                }
             }
         }
         // Persist every complete draft change. Focus/submit hooks below remain
         // as safety nets for formatter updates that settle at edit boundaries.
-        .onChange(of: draft) { _, _ in
+        .onChange(of: editor) { oldValue, newValue in
+            // A month switch replaces the month and draft atomically. Skipping
+            // that transition prevents one month's values being saved into
+            // the other month during SwiftUI's update pass.
+            guard oldValue.month == newValue.month else { return }
             commitIfDirty()
         }
         // Auto-save when focus leaves any goal-related field.
@@ -151,12 +248,42 @@ struct GoalEditorSection: View {
             "Rewrite all past months?",
             isPresented: $showRetroDialog
         ) {
-            Button("Rewrite All Past Months", role: .destructive) {
+            Button("Apply to \(historicalMonths.count) Past \(historicalMonths.count == 1 ? "Month" : "Months")", role: .destructive) {
                 apply(retroactive: true)
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("Every recorded past month will be overwritten with the current rate and goal. Normal edits never touch past months.")
+            Text("The current rate and goal will overwrite this client's goal in every available past month. Normal edits never touch past months.")
+        }
+        .confirmationDialog(
+            "Save \(Format.monthTitle(month, timeZone: appState.timeZone)) goal?",
+            isPresented: $showHistoricalSaveDialog
+        ) {
+            Button("Save \(Format.monthName(month, timeZone: appState.timeZone)) Goal") {
+                saveHistoricalGoal()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This records a goal version for \(Format.monthTitle(month, timeZone: appState.timeZone)) only. Later goals stay unchanged.")
+        }
+        .confirmationDialog(
+            "Unsaved \(Format.monthTitle(month, timeZone: appState.timeZone)) changes",
+            isPresented: $showUnsavedSwitchDialog
+        ) {
+            if draft.monthlyGoal != nil {
+                Button("Save and Switch") {
+                    saveHistoricalGoal()
+                    completePendingMonthSwitch()
+                }
+            }
+            Button("Discard and Switch", role: .destructive) {
+                completePendingMonthSwitch()
+            }
+            Button("Cancel", role: .cancel) {
+                pendingMonth = nil
+            }
+        } message: {
+            Text("Past-month changes require confirmation before switching months.")
         }
     }
 
@@ -173,7 +300,7 @@ struct GoalEditorSection: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
             TextField(title, value: value, format: .number.precision(.fractionLength(0...2)))
-                .textFieldStyle(.plain)
+                .textFieldStyle(.roundedBorder)
                 .multilineTextAlignment(textAlignment)
                 .frame(minWidth: min(width, 88), idealWidth: width, maxWidth: width)
                 .focused(focus, equals: focusTag)
@@ -184,12 +311,34 @@ struct GoalEditorSection: View {
 
     // MARK: Bindings
 
+    private var monthBinding: Binding<YearMonth> {
+        Binding {
+            month
+        } set: { newMonth in
+            guard newMonth != month else { return }
+            if isHistoricalMonth && isDirty {
+                pendingMonth = newMonth
+                showUnsavedSwitchDialog = true
+            } else {
+                switchToMonth(newMonth)
+            }
+        }
+    }
+
     private var hoursBinding: Binding<Decimal?> {
-        Binding { draft.hours } set: { draft.setHours($0) }
+        Binding { editor.draft.hours } set: { newValue in
+            var updated = editor
+            updated.draft.setHours(newValue)
+            editor = updated
+        }
     }
 
     private var revenueBinding: Binding<Decimal?> {
-        Binding { draft.revenue } set: { draft.setRevenue($0) }
+        Binding { editor.draft.revenue } set: { newValue in
+            var updated = editor
+            updated.draft.setRevenue(newValue)
+            editor = updated
+        }
     }
 
     // MARK: Saving
@@ -198,13 +347,45 @@ struct GoalEditorSection: View {
     /// is always "this month and onward"; rewriting history hides behind the
     /// explicit menu + confirmation.
     private func commitIfDirty() {
+        guard !isHistoricalMonth else { return }
         guard draft.monthlyGoal != nil, isDirty else { return }
         apply(retroactive: false)
     }
 
     private func apply(retroactive: Bool) {
-        guard let goal = draft.monthlyGoal ?? client.goal(for: month) else { return }
-        appState.config.setGoal(goal, forClient: client.id, from: month, retroactive: retroactive)
+        guard let goal = draft.monthlyGoal ?? liveClient.goal(for: month) else { return }
+        appState.config.setGoal(
+            goal,
+            forClient: client.id,
+            from: month,
+            retroactive: retroactive,
+            historicalMonths: retroactive ? historicalMonths : []
+        )
+        showSavedFeedback()
+    }
+
+    private func saveHistoricalGoal() {
+        guard isHistoricalMonth, isDirty, let goal = draft.monthlyGoal else { return }
+        appState.config.setGoalVersion(goal, forClient: client.id, at: month)
+        showSavedFeedback()
+    }
+
+    private func resetDraft() {
+        editor = GoalEditorState(client: liveClient, month: month)
+    }
+
+    private func switchToMonth(_ newMonth: YearMonth) {
+        editor = GoalEditorState(client: liveClient, month: newMonth)
+        savedFeedback = false
+    }
+
+    private func completePendingMonthSwitch() {
+        guard let pendingMonth else { return }
+        self.pendingMonth = nil
+        switchToMonth(pendingMonth)
+    }
+
+    private func showSavedFeedback() {
         withAnimation {
             savedFeedback = true
         }

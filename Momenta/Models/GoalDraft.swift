@@ -78,3 +78,19 @@ struct GoalDraft: Equatable {
         }
     }
 }
+
+/// The month and values move together so switching months cannot briefly
+/// pair one month's draft with another month's save target.
+struct GoalEditorState: Equatable {
+    var month: YearMonth
+    var draft: GoalDraft
+
+    init(client: ClientConfig, month: YearMonth) {
+        self.month = month
+        var draft = GoalDraft(goal: client.goal(for: month), isBillable: client.isBillable)
+        if (draft.hourlyRate ?? 0) <= 0, let rate = client.editorHourlyRate(for: month) {
+            draft.setRate(rate)
+        }
+        self.draft = draft
+    }
+}
