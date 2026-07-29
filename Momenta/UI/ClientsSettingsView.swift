@@ -197,6 +197,7 @@ struct ClientSelectorView: View {
                 .toggleStyle(.switch)
                 .controlSize(.mini)
                 .labelsHidden()
+                .accessibilityLabel("Show \(client.displayName) in Momenta")
                 .onKeyPress(.tab, phases: [.down]) { keyPress in
                     guard !keyPress.modifiers.contains(.shift) else {
                         return .ignored

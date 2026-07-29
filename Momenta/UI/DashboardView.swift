@@ -435,6 +435,8 @@ struct DashboardView: View {
                     .imageScale(.large)
             }
             .buttonStyle(.borderless)
+            .accessibilityLabel("Settings")
+            .accessibilityHint("Opens Momenta settings")
         }
         // One environment font sizes the whole strip: status text, error
         // icons, and the Reconnect button all follow it.

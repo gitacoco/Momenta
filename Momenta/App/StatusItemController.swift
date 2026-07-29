@@ -35,19 +35,23 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
         if let button = statusItem.button {
             // The embedded hosting view supplies the pixels, but macOS exposes
             // the outer NSStatusBarButton to menu-bar keyboard navigation.
-            // Describe that real action element directly instead of leaving it
-            // as an unnamed AXUnknown container.
+            // The resulting AXMenuBarItem only forwards AXTitle, AXHelp, and
+            // AXPress from the button; AXLabel and AXValue are not exposed.
+            // Keep the live progress summary in AXTitle so VoiceOver receives
+            // both the app name and the information visible in the menu bar.
+            let initialAccessibilityValue = MenuBarPresentation(
+                aggregate: appState.menuBarAggregate,
+                settings: appState.displaySettings,
+                unit: appState.displayUnit
+            ).accessibilityValue
             button.setAccessibilityElement(true)
             button.setAccessibilityRole(.button)
             button.setAccessibilityLabel("Momenta")
             button.setAccessibilityHelp("Open dashboard")
             button.setAccessibilityIdentifier("momenta.status-item")
-            button.setAccessibilityValue(
-                MenuBarPresentation(
-                    aggregate: appState.menuBarAggregate,
-                    settings: appState.displaySettings,
-                    unit: appState.displayUnit
-                ).accessibilityValue
+            Self.updateStatusItemAccessibility(
+                button,
+                value: initialAccessibilityValue
             )
             button.setAccessibilityCustomActions([
                 NSAccessibilityCustomAction(
@@ -61,7 +65,8 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
             let hosting = NSHostingView(
                 rootView: MenuBarLabelContainer(
                     accessibilityValueChanged: { [weak button] value in
-                        button?.setAccessibilityValue(value)
+                        guard let button else { return }
+                        Self.updateStatusItemAccessibility(button, value: value)
                     }
                 )
                 .environment(appState)
@@ -94,6 +99,32 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
             name: .momentaWillOpenSettings,
             object: nil
         )
+    }
+
+    private static func statusItemAccessibilityTitle(value: String) -> String {
+        "Momenta, \(value)"
+    }
+
+    private static func updateStatusItemAccessibility(
+        _ button: NSStatusBarButton,
+        value: String
+    ) {
+        let title = statusItemAccessibilityTitle(value: value)
+
+        // AppKit derives AXTitle for a status extra from the button's rendered
+        // title rather than its accessibilityTitle override. Supply the same
+        // semantic text as a transparent, sub-point attributed title: it is
+        // available to VoiceOver without competing with the NSHostingView that
+        // owns the visible menu-bar pixels or widening the status item.
+        button.attributedTitle = NSAttributedString(
+            string: title,
+            attributes: [
+                .font: NSFont.systemFont(ofSize: 0.1),
+                .foregroundColor: NSColor.clear,
+            ]
+        )
+        button.setAccessibilityTitle(title)
+        button.setAccessibilityValue(value)
     }
 
     deinit {
