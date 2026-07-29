@@ -100,6 +100,14 @@ private enum PeriodChartAxis {
         max(totalHeight - topGutterHeight - xGutterHeight, 1)
     }
 
+    /// Cards size their chart from the plot they want rather than from a total
+    /// height, so gutters growing with larger accessibility text take room
+    /// from the card instead of flattening the plot.
+    static let preferredPlotHeight: CGFloat = 70
+    static var preferredChartHeight: CGFloat {
+        preferredPlotHeight + topGutterHeight + xGutterHeight
+    }
+
     static func yTicks(for model: PeriodChartModel) -> [AxisTick<Double>] {
         PeriodChartLayout.yAxisTicks(upperBound: model.yUpperBound).map { value in
             let label = value.formatted(.number.precision(.fractionLength(0...2)))
@@ -655,14 +663,17 @@ struct ClientCardView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             header
-                .padding(.bottom, bodyIsChart ? 8 : 4)
+                // Chart cards rely on the stack spacing alone: the plot's own
+                // top gutter already sets the header off from the first
+                // gridline, so extra padding here reads as a gap twice over.
+                .padding(.bottom, bodyIsChart ? 0 : 4)
             if let chartModel {
                 GeometryReader { proxy in
                     AnimatedPeriodChartHost(target: chartModel, size: proxy.size) { rendered, plotHeight in
                         periodChart(rendered, plotHeight: plotHeight)
                     }
                 }
-                .frame(height: 110)
+                .frame(height: PeriodChartAxis.preferredChartHeight)
 
                 switch data {
                 case .month(let progress):
