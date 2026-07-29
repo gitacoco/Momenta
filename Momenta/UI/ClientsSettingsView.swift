@@ -254,6 +254,7 @@ struct ClientDetailColumn: View {
             if let id = selectedClientID, let client = appState.config.client(id: id) {
                 ClientDetailView(
                     client: client,
+                    initialGoalMonth: appState.currentMonth,
                     showsWorkspace: isMultiWorkspace,
                     focusedField: focusedField
                 )
@@ -280,31 +281,21 @@ private struct ClientDetailView: View {
     @Environment(AppState.self) private var appState
     let client: ClientConfig
     let showsWorkspace: Bool
-    @State private var draft: GoalDraft
+    @State private var goalEditor: GoalEditorState
     @State private var showLogoImporter = false
     @State private var logoImportError: String?
     var focusedField: FocusState<ClientField?>.Binding
 
     init(
         client: ClientConfig,
+        initialGoalMonth: YearMonth,
         showsWorkspace: Bool,
         focusedField: FocusState<ClientField?>.Binding
     ) {
         self.client = client
         self.showsWorkspace = showsWorkspace
         self.focusedField = focusedField
-        let month = YearMonth(containing: Date(), timeZone: .current)
-        _draft = State(initialValue: Self.makeDraft(for: client, month: month))
-    }
-
-    /// The editor's starting state, including the rate a half-finished
-    /// re-enable left out of the goal (see `editorHourlyRate`).
-    private static func makeDraft(for client: ClientConfig, month: YearMonth) -> GoalDraft {
-        var draft = GoalDraft(goal: client.goal(for: month), isBillable: client.isBillable)
-        if (draft.hourlyRate ?? 0) <= 0, let rate = client.editorHourlyRate(for: month) {
-            draft.setRate(rate)
-        }
-        return draft
+        _goalEditor = State(initialValue: GoalEditorState(client: client, month: initialGoalMonth))
     }
 
     private static let currencyCodes = [
@@ -373,7 +364,7 @@ private struct ClientDetailView: View {
                     .foregroundStyle(.secondary)
                 }
             } else {
-                GoalEditorSection(client: client, draft: $draft, focus: focusedField)
+                GoalEditorSection(client: client, editor: $goalEditor, focus: focusedField)
             }
 
             pacingSection
@@ -405,7 +396,11 @@ private struct ClientDetailView: View {
         // `setBillable` already restored the rate into the goal, so this only
         // has to follow the model — including the parked rate it surfaces.
         .onChange(of: isBillable) { _, _ in
-            draft = Self.makeDraft(for: liveClient, month: appState.currentMonth)
+            goalEditor = GoalEditorState(client: liveClient, month: goalEditor.month)
+        }
+        .onChange(of: appState.currentMonth) { oldMonth, newMonth in
+            guard goalEditor.month == oldMonth else { return }
+            goalEditor = GoalEditorState(client: liveClient, month: newMonth)
         }
     }
 
@@ -480,12 +475,16 @@ private struct ClientDetailView: View {
 
     // MARK: Needs setup (itemized, click-to-focus)
 
+    private var currentGoalDraft: GoalDraft {
+        GoalEditorState(client: liveClient, month: appState.currentMonth).draft
+    }
+
     private var missingRate: Bool {
-        isBillable && (draft.hourlyRate ?? 0) <= 0
+        isBillable && (currentGoalDraft.hourlyRate ?? 0) <= 0
     }
 
     private var missingGoal: Bool {
-        (draft.hours ?? 0) <= 0 && (draft.revenue ?? 0) <= 0
+        (currentGoalDraft.hours ?? 0) <= 0 && (currentGoalDraft.revenue ?? 0) <= 0
     }
 
     private var needsSetupSection: some View {
@@ -779,7 +778,11 @@ private struct ClientDetailView: View {
     }
 
     private var rateBinding: Binding<Decimal?> {
-        Binding { draft.hourlyRate } set: { draft.setRate($0) }
+        Binding { goalEditor.draft.hourlyRate } set: { newValue in
+            var updated = goalEditor
+            updated.draft.setRate(newValue)
+            goalEditor = updated
+        }
     }
 
     private var billableBinding: Binding<Bool> {

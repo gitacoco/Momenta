@@ -76,6 +76,14 @@ final class ConfigStore {
         update(config)
     }
 
+    /// Records one historical version without disturbing later versions.
+    /// The version naturally remains in effect until the next recorded month.
+    func setGoalVersion(_ goal: MonthlyGoal, forClient clientID: Int, at month: YearMonth) {
+        guard var config = client(id: clientID) else { return }
+        config.goalHistory[month] = goal
+        update(config)
+    }
+
     // MARK: Toggl reconciliation
 
     /// Merges the fetched Toggl client list into local configs:
