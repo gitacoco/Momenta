@@ -47,23 +47,17 @@ enum PeriodChartLayout {
         return rounded * magnitude
     }
 
-    /// Gridline values for the hand-drawn Y axis: multiples of a nice step
-    /// (1 / 2 / 2.5 / 5 × 10ⁿ) from zero through the domain's upper bound.
-    /// Week and month bounds draw from the same step family, so a period
-    /// switch usually keeps some tick values identical — those slide with the
-    /// rescaling axis while the rest fade in or out.
-    static func yAxisTicks(upperBound: Double, targetCount: Int = 4) -> [Double] {
+    /// Gridline values for the hand-drawn Y axis: the baseline, the midpoint,
+    /// and the domain's upper bound. Halving the domain instead of picking a
+    /// nice step keeps every card's gridline density identical and always
+    /// lands the top gridline on the plot's top edge, so cards no longer end
+    /// up with two, three, or four bands depending on where their bound fell
+    /// in the rounding ladder. A period switch rescales the same three ticks,
+    /// so only values shared by both bounds slide; the rest cross-fade.
+    static func yAxisTicks(upperBound: Double) -> [Double] {
         guard upperBound > 0, upperBound.isFinite else { return [0] }
 
-        let rawStep = upperBound / Double(targetCount)
-        let magnitude = pow(10, floor(log10(rawStep)))
-        let normalized = rawStep / magnitude
-        let candidates = [1.0, 2, 2.5, 5, 10]
-        let step = (candidates.first(where: { $0 >= normalized }) ?? 10) * magnitude
-        // The epsilon keeps a bound that is an exact multiple of the step
-        // from losing its top tick to floating-point noise.
-        let count = Int(((upperBound / step) + 1e-9).rounded(.down))
-        return (0...count).map { Double($0) * step }
+        return [0, upperBound / 2, upperBound]
     }
 
     /// Chooses the marker-label side using the space that will actually remain
