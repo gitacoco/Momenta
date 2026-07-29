@@ -47,12 +47,24 @@ final class ConfigStore {
     /// Records a goal version. Default scope is "this month and onward":
     /// the version is written at `month`, any explicit versions in later
     /// months are replaced, and earlier months keep their recorded versions.
-    /// With `retroactive`, every previously recorded month is overwritten too
-    /// — only ever called after the user explicitly confirmed that.
-    func setGoal(_ goal: MonthlyGoal, forClient clientID: Int, from month: YearMonth, retroactive: Bool) {
+    /// With `retroactive`, every previously recorded month and every known
+    /// historical month supplied by the caller is overwritten too — only ever
+    /// called after the user explicitly confirmed that. Supplying the known
+    /// months matters for a client's first goal: there are no existing goal
+    /// keys to rewrite yet, but the account can still have historical data
+    /// that needs an explicit starting version.
+    func setGoal(
+        _ goal: MonthlyGoal,
+        forClient clientID: Int,
+        from month: YearMonth,
+        retroactive: Bool,
+        historicalMonths: [YearMonth] = []
+    ) {
         guard var config = client(id: clientID) else { return }
         if retroactive {
-            for key in config.goalHistory.keys {
+            let keysToRewrite = Set(config.goalHistory.keys)
+                .union(historicalMonths.filter { $0 < month })
+            for key in keysToRewrite {
                 config.goalHistory[key] = goal
             }
         } else {

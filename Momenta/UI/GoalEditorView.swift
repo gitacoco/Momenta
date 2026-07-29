@@ -28,8 +28,19 @@ struct GoalEditorSection: View {
         appState.currentMonth
     }
 
+    /// Past months come from the account's navigable Toggl history as well as
+    /// goal versions retained beyond that API window. Looking only at goal
+    /// keys makes the retroactive action disappear for the exact first-goal
+    /// case where history needs to be backfilled.
+    private var historicalMonths: [YearMonth] {
+        Set(appState.availableMonths)
+            .union(client.goalHistory.keys)
+            .filter { $0 < month }
+            .sorted()
+    }
+
     private var hasHistoricalMonths: Bool {
-        client.goalHistory.keys.contains { $0 < month }
+        !historicalMonths.isEmpty
     }
 
     private var isDirty: Bool {
@@ -100,6 +111,21 @@ struct GoalEditorSection: View {
             }
             .padding(.vertical, 2)
             }
+
+            if hasHistoricalMonths {
+                HStack {
+                    Spacer()
+                    Button {
+                        showRetroDialog = true
+                    } label: {
+                        Label("Apply Current Goal to Past Months…", systemImage: "clock.arrow.circlepath")
+                    }
+                    .buttonStyle(.borderless)
+                    .disabled(draft.monthlyGoal == nil && client.goal(for: month) == nil)
+                    .help("Replace this client's rate and goal in every available past month")
+                    .accessibilityHint("Asks for confirmation before changing historical goals")
+                }
+            }
         } header: {
             HStack(alignment: .firstTextBaseline) {
                 VStack(alignment: .leading, spacing: 2) {
@@ -116,17 +142,6 @@ struct GoalEditorSection: View {
                         .font(.callout)
                         .foregroundStyle(.green)
                         .transition(.opacity)
-                }
-                if hasHistoricalMonths {
-                    Menu {
-                        Button("Apply Current Goal to All Past Months…", role: .destructive) {
-                            showRetroDialog = true
-                        }
-                    } label: {
-                        Image(systemName: "ellipsis.circle")
-                    }
-                    .menuIndicator(.hidden)
-                    .fixedSize()
                 }
             }
         }
@@ -151,12 +166,12 @@ struct GoalEditorSection: View {
             "Rewrite all past months?",
             isPresented: $showRetroDialog
         ) {
-            Button("Rewrite All Past Months", role: .destructive) {
+            Button("Apply to \(historicalMonths.count) Past \(historicalMonths.count == 1 ? "Month" : "Months")", role: .destructive) {
                 apply(retroactive: true)
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("Every recorded past month will be overwritten with the current rate and goal. Normal edits never touch past months.")
+            Text("The current rate and goal will overwrite this client's goal in every available past month. Normal edits never touch past months.")
         }
     }
 
@@ -204,7 +219,13 @@ struct GoalEditorSection: View {
 
     private func apply(retroactive: Bool) {
         guard let goal = draft.monthlyGoal ?? client.goal(for: month) else { return }
-        appState.config.setGoal(goal, forClient: client.id, from: month, retroactive: retroactive)
+        appState.config.setGoal(
+            goal,
+            forClient: client.id,
+            from: month,
+            retroactive: retroactive,
+            historicalMonths: retroactive ? historicalMonths : []
+        )
         withAnimation {
             savedFeedback = true
         }

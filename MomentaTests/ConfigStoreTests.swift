@@ -222,6 +222,50 @@ struct ConfigStoreTests {
         #expect(history[july] == newGoal)
     }
 
+    @Test func setGoalRetroactiveBackfillsKnownMonthsWithoutRecordedGoals() {
+        let store = ConfigStore(defaults: freshDefaults())
+        let may = YearMonth(year: 2026, month: 5)
+        let june = YearMonth(year: 2026, month: 6)
+        let july = YearMonth(year: 2026, month: 7)
+        seed(store, existingClient())
+
+        let newGoal = MonthlyGoal(hourlyRate: 120, input: .revenue(9600))
+        store.setGoal(
+            newGoal,
+            forClient: 7,
+            from: july,
+            retroactive: true,
+            historicalMonths: [may, june]
+        )
+
+        let history = store.client(id: 7)!.goalHistory
+        #expect(history[may] == newGoal)
+        #expect(history[june] == newGoal)
+        #expect(history[july] == newGoal)
+    }
+
+    @Test func setGoalRetroactiveIgnoresSuppliedCurrentAndFutureMonths() {
+        let store = ConfigStore(defaults: freshDefaults())
+        let june = YearMonth(year: 2026, month: 6)
+        let july = YearMonth(year: 2026, month: 7)
+        let august = YearMonth(year: 2026, month: 8)
+        seed(store, existingClient())
+
+        let newGoal = MonthlyGoal(hourlyRate: 120, input: .hours(80))
+        store.setGoal(
+            newGoal,
+            forClient: 7,
+            from: july,
+            retroactive: true,
+            historicalMonths: [june, july, august]
+        )
+
+        let history = store.client(id: 7)!.goalHistory
+        #expect(history[june] == newGoal)
+        #expect(history[july] == newGoal)
+        #expect(history[august] == nil)
+    }
+
     @Test func setGoalReplacesExplicitFutureVersions() {
         let store = ConfigStore(defaults: freshDefaults())
         let july = YearMonth(year: 2026, month: 7)
