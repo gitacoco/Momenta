@@ -36,22 +36,24 @@ struct PeriodChartLayoutTests {
         #expect(PeriodChartLayout.yDomainUpperBound(values: [0.6]) == 0.8)
     }
 
-    @Test func yTicksUseNiceStepsSharedAcrossPeriodScales() {
-        // A week topping out at 20 and its month at 80 share the 0 and 20
-        // gridlines, which slide during the period transition while the
-        // others fade in or out.
-        #expect(PeriodChartLayout.yAxisTicks(upperBound: 20) == [0, 5, 10, 15, 20])
-        #expect(PeriodChartLayout.yAxisTicks(upperBound: 80) == [0, 20, 40, 60, 80])
+    @Test func yTicksHalveEveryDomainSoCardsShareOneGridlineDensity() {
+        // Bounds that used to yield two, three, and four bands under the nice
+        // step ladder now all draw the same three gridlines.
+        #expect(PeriodChartLayout.yAxisTicks(upperBound: 50) == [0, 25, 50])
+        #expect(PeriodChartLayout.yAxisTicks(upperBound: 60) == [0, 30, 60])
+        #expect(PeriodChartLayout.yAxisTicks(upperBound: 20) == [0, 10, 20])
     }
 
-    @Test func yTicksStopBelowTheUpperBoundWhenTheStepOvershoots() {
-        #expect(PeriodChartLayout.yAxisTicks(upperBound: 50) == [0, 20, 40])
+    @Test func yTicksAlwaysReachTheUpperBound() {
+        for bound in [1.0, 1.25, 1.5, 2, 2.5, 3, 4, 5, 6, 8, 10] {
+            #expect(PeriodChartLayout.yAxisTicks(upperBound: bound).last == bound)
+        }
     }
 
     @Test func yTicksHandleFractionalStepsAndDegenerateBounds() {
         let fractional = PeriodChartLayout.yAxisTicks(upperBound: 1)
-        #expect(fractional.count == 5)
-        for (tick, expected) in zip(fractional, [0, 0.25, 0.5, 0.75, 1]) {
+        #expect(fractional.count == 3)
+        for (tick, expected) in zip(fractional, [0, 0.5, 1]) {
             #expect(abs(tick - expected) < 1e-9)
         }
         #expect(PeriodChartLayout.yAxisTicks(upperBound: 0) == [0])

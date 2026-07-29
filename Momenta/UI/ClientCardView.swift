@@ -62,11 +62,17 @@ private enum PeriodChartAxis {
     static let labelFont = NSFont.preferredFont(forTextStyle: .caption2, options: [:])
     static let labelHeight = ceil(labelFont.ascender - labelFont.descender + labelFont.leading)
     static let xGutterHeight = labelHeight + 4
+    /// Headroom above the plot so the tick sitting on the upper bound can
+    /// center its label on its own gridline. Without it the topmost label
+    /// would have to be pushed down half a line to stay readable, and every
+    /// card would show its top label out of line with the rule it names.
+    static let topGutterHeight = ceil(labelHeight / 2)
     static let yLabelLeading: CGFloat = 6
     static let markerFont = NSFont.preferredFont(forTextStyle: .caption1, options: [:])
     static let markerLabelHeight = ceil(
         markerFont.ascender - markerFont.descender + markerFont.leading
     )
+    static let gridlineWidth: CGFloat = 1
     static let markerSpacing: CGFloat = 4
     static let markerSymbolArea: CGFloat = 36
     /// Swift Charts expresses symbol size as area, so the 36 pt² circular mark
@@ -88,6 +94,10 @@ private enum PeriodChartAxis {
 
     static func plotWidth(totalWidth: CGFloat, yTicks: [AxisTick<Double>]) -> CGFloat {
         max(totalWidth - yGutterWidth(yTicks), 1)
+    }
+
+    static func plotHeight(totalHeight: CGFloat) -> CGFloat {
+        max(totalHeight - topGutterHeight - xGutterHeight, 1)
     }
 
     static func yTicks(for model: PeriodChartModel) -> [AxisTick<Double>] {
@@ -174,18 +184,21 @@ private struct AnimatedPeriodChartHost<Content: View>: View {
             totalWidth: size.width,
             yTicks: yTicks.filter(\.isActive)
         )
-        let plotHeight = max(size.height - PeriodChartAxis.xGutterHeight, 1)
+        let topGutter = PeriodChartAxis.topGutterHeight
+        let plotHeight = PeriodChartAxis.plotHeight(totalHeight: size.height)
 
         // Each layer clips to its own region — the plot for marks and
-        // gridlines, the gutters for labels. The chart alone gets one marker
-        // radius of bleed so strokes and symbols centered exactly on a plot
-        // boundary stay whole; the zoom's farther-off union marks remain cut.
+        // gridlines, the gutters for labels — and sits below the top gutter so
+        // the upper-bound tick has room for its label. The chart gets one
+        // marker radius of bleed and the gridlines one rule of bleed, so
+        // strokes, symbols, and rules centered exactly on a plot boundary stay
+        // whole; the zoom's farther-off union marks and rules remain cut.
         ZStack(alignment: .topLeading) {
             ZStack(alignment: .topLeading) {
                 ForEach(yTicks) { tick in
                     Rectangle()
                         .fill(Color(nsColor: .quaternaryLabelColor))
-                        .frame(width: plotWidth, height: 1)
+                        .frame(width: plotWidth, height: PeriodChartAxis.gridlineWidth)
                         .position(
                             x: plotWidth / 2,
                             y: yPosition(tick.value, plotHeight: plotHeight)
@@ -194,12 +207,19 @@ private struct AnimatedPeriodChartHost<Content: View>: View {
                 }
             }
             .frame(width: plotWidth, height: plotHeight)
-            .clipped()
+            .clipShape(Rectangle().inset(by: -PeriodChartAxis.gridlineWidth))
+            .offset(y: topGutter)
             content(rendered, plotHeight)
                 .frame(width: plotWidth, height: plotHeight)
                 .clipShape(Rectangle().inset(by: -PeriodChartAxis.plotClipBleed))
+                .offset(y: topGutter)
+            // The label layer covers the top gutter as well as the plot, so a
+            // label centered on the topmost gridline is fully inside it.
             ZStack(alignment: .topLeading) {
-                ForEach(yTicks) { tick in
+                // The baseline keeps its gridline but drops its label: zero is
+                // the implied origin of every cumulative chart, and printing it
+                // only crowds the first X label sharing that corner.
+                ForEach(yTicks.filter { $0.value != 0 }) { tick in
                     axisLabel(tick.label)
                         .position(
                             x: PeriodChartAxis.yLabelLeading + tick.labelWidth / 2,
@@ -208,7 +228,7 @@ private struct AnimatedPeriodChartHost<Content: View>: View {
                         .opacity(tick.isActive ? 1 : 0)
                 }
             }
-            .frame(width: max(size.width - plotWidth, 0), height: plotHeight)
+            .frame(width: max(size.width - plotWidth, 0), height: topGutter + plotHeight)
             .clipped()
             .offset(x: plotWidth)
             ZStack(alignment: .topLeading) {
@@ -223,7 +243,7 @@ private struct AnimatedPeriodChartHost<Content: View>: View {
             }
             .frame(width: size.width, height: PeriodChartAxis.xGutterHeight)
             .clipped()
-            .offset(y: plotHeight)
+            .offset(y: topGutter + plotHeight)
         }
         .onChange(of: target) { previous, next in
             transition(from: previous, to: next)
@@ -249,13 +269,13 @@ private struct AnimatedPeriodChartHost<Content: View>: View {
         return min(max(position, tick.labelWidth / 2), size.width - tick.labelWidth / 2)
     }
 
+    /// Y labels are laid out in the layer that spans the top gutter and the
+    /// plot, so every label centers on its own gridline. Nothing clamps them:
+    /// the top gutter already guarantees room for the upper-bound tick, the
+    /// baseline draws no label, and a tick projected off-plot mid-zoom should
+    /// ride the rescaling axis out of view rather than stick to the edge.
     private func yLabelPosition(_ tick: AxisTick<Double>, plotHeight: CGFloat) -> CGFloat {
-        let position = yPosition(tick.value, plotHeight: plotHeight)
-        guard tick.isActive else { return position }
-        return min(
-            max(position, PeriodChartAxis.labelHeight / 2),
-            plotHeight - PeriodChartAxis.labelHeight / 2
-        )
+        PeriodChartAxis.topGutterHeight + yPosition(tick.value, plotHeight: plotHeight)
     }
 
     /// The tick's center under the currently rendered (animating) domain.
