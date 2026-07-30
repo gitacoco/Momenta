@@ -547,14 +547,13 @@ private struct ClientDetailView: View {
         Section("Pacing") {
             ViewThatFits(in: .horizontal) {
                 HStack(alignment: .top, spacing: 24) {
-                    Text("Planned progress on")
-                        .fixedSize()
+                    plannedProgressLabel
                     Spacer(minLength: 0)
                     pacingOptions
                 }
 
                 VStack(alignment: .leading, spacing: 10) {
-                    Text("Planned progress on")
+                    plannedProgressLabel
                     pacingOptions
                 }
             }
@@ -564,7 +563,14 @@ private struct ClientDetailView: View {
             }
 
             workHoursRow
+        }
+    }
 
+    /// The row label plus an inline caption for the selected pacing option.
+    private var plannedProgressLabel: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text("Planned progress on")
+                .fixedSize()
             Text(pacingCaption)
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
