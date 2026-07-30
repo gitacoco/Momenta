@@ -24,7 +24,10 @@ struct ClientAvatar: View {
                 .clipShape(shape)
                 .background {
                     if needsBacking {
-                        shape.fill(.white)
+                        // Extended a point past the mark on every side, so it
+                        // reads as a border around the logo rather than a fill
+                        // only visible through a transparent one.
+                        shape.fill(.white).padding(-1)
                     }
                 }
         } else {
@@ -34,7 +37,7 @@ struct ClientAvatar: View {
                 .frame(width: size, height: size)
                 .background {
                     if needsBacking {
-                        Circle().fill(.white)
+                        Circle().fill(.white).padding(-1)
                     }
                 }
         }

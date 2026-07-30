@@ -250,7 +250,10 @@ private struct SelectedRowOutline: ViewModifier {
     func body(content: Content) -> some View {
         content.overlay {
             if backgroundProminence == .increased {
-                Capsule().strokeBorder(.white, lineWidth: 1)
+                // Negative padding expands the shape a point past the control,
+                // so strokeBorder lays the line in that outer band instead of
+                // eating into the switch's own fill.
+                Capsule().strokeBorder(.white, lineWidth: 1).padding(-1)
             }
         }
     }
