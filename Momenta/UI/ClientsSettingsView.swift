@@ -564,13 +564,13 @@ private struct ClientDetailView: View {
 
             VStack(alignment: .leading, spacing: 6) {
                 Text(pacingCaption)
-                    .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
 
                 Text("Work hours shape the day timeline: its plan line rises only between these times, so mornings before work carry no planned progress.")
-                    .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
+            .font(.subheadline)
+            .foregroundStyle(.secondary)
         }
     }
 
