@@ -13,6 +13,10 @@ struct MomentaApp: App {
             SettingsView()
                 .environment(AppState.shared)
         }
+        // A first open lands a little above the minimum rather than pinned to
+        // it. macOS restores the window's own saved frame from then on, so
+        // this is the size a fresh install sees, not a size imposed later.
+        .defaultSize(width: 960, height: 660)
         .windowResizability(.contentMinSize)
         .windowToolbarStyle(.automatic)
         .defaultLaunchBehavior(.suppressed)

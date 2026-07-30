@@ -1,5 +1,38 @@
 import SwiftUI
 
+/// Every width the settings window's layout is built from, in one place.
+///
+/// The window's minimum is *derived* from these rather than written down
+/// beside them: the two used to be independent numbers that had to agree by
+/// hand, and when the grouped form's insets grew the page quietly outgrew its
+/// pane and overflowed across the selector and the window edge. Adjusting any
+/// single measurement here now moves the window's minimum with it.
+enum SettingsMetrics {
+    static let primarySidebar: CGFloat = 180
+    /// The sidebar pane reserves a fixed gutter beside its list before the
+    /// split view's divider.
+    static let primarySidebarGutter: CGFloat = 8
+    static let clientSelector: CGFloat = 240
+    static let selectorLeadingInset: CGFloat = 20
+    static let selectorTrailingInset: CGFloat = 16
+    /// The narrowest the client editor may be asked to render. Its widest row
+    /// is the three pacing cards at their compressed floor plus the grouped
+    /// form's own insets; the remainder is slack, so a row that grows a little
+    /// no longer pushes the page out of its pane.
+    static let clientEditorMinimum: CGFloat = 420
+
+    static var windowMinimumWidth: CGFloat {
+        primarySidebar
+            + primarySidebarGutter
+            + selectorLeadingInset
+            + clientSelector
+            + selectorTrailingInset
+            + clientEditorMinimum
+    }
+
+    static let windowMinimumHeight: CGFloat = 560
+}
+
 /// Single Settings window (Cmd+,) with one persistent Account / Clients /
 /// Display sidebar. Every destination replaces only the detail page so the
 /// native split view and the user's chosen sidebar width remain stable.
@@ -37,8 +70,8 @@ struct SettingsView: View {
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
     @FocusState private var clientDetailFocus: ClientField?
 
-    private let primarySidebarWidth: CGFloat = 180
-    private let clientSelectorWidth: CGFloat = 240
+    private let primarySidebarWidth = SettingsMetrics.primarySidebar
+    private let clientSelectorWidth = SettingsMetrics.clientSelector
 
     private var currentSection: Section {
         selection ?? .account
@@ -50,10 +83,15 @@ struct SettingsView: View {
         } detail: {
             pageHost
         }
-        // The fixed client selector and client editor both fit at this stable
-        // minimum, so changing destinations never changes the window's own
-        // layout contract.
-        .frame(minWidth: 940, maxWidth: .infinity, minHeight: 560, maxHeight: .infinity)
+        // One minimum for every destination, so navigating never renegotiates
+        // the window's own layout contract. Clients is the widest page, so it
+        // sets the figure; the others simply have room to spare.
+        .frame(
+            minWidth: SettingsMetrics.windowMinimumWidth,
+            maxWidth: .infinity,
+            minHeight: SettingsMetrics.windowMinimumHeight,
+            maxHeight: .infinity
+        )
         .boundedPrimarySidebarResizeHandle(
             minimumWidth: primarySidebarWidth,
             maximumWidth: primarySidebarWidth
@@ -110,20 +148,22 @@ struct SettingsView: View {
                     RoundedRectangle(cornerRadius: 10, style: .continuous)
                         .stroke(Color(nsColor: .separatorColor).opacity(0.65))
                 }
-                .padding(.leading, 20)
+                .padding(.leading, SettingsMetrics.selectorLeadingInset)
                 .padding(.vertical, 16)
-                .padding(.trailing, 16)
+                .padding(.trailing, SettingsMetrics.selectorTrailingInset)
 
-            // 476 = 940 window minimum - 188 sidebar pane - 276 selector block
-            // (20 leading + 240 card + 16 trailing). One point more and the
-            // page's minimums exceed the window minimum, which makes SwiftUI
-            // overflow the whole split container 2 pt past each window edge —
-            // visibly shifting the sidebar and toolbar left on navigation.
+            // The window minimum is this figure plus everything to its left,
+            // so the editor is guaranteed its share and never has to overflow
+            // the pane to lay itself out.
             ClientDetailColumn(
                 selectedClientID: selectedClientID,
                 focusedField: $clientDetailFocus
             )
-                .frame(minWidth: 476, maxWidth: .infinity, maxHeight: .infinity)
+                .frame(
+                    minWidth: SettingsMetrics.clientEditorMinimum,
+                    maxWidth: .infinity,
+                    maxHeight: .infinity
+                )
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
