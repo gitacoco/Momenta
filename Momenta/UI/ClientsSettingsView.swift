@@ -363,13 +363,16 @@ private struct ClientDetailView: View {
                     )
                     .foregroundStyle(.secondary)
                 }
+                // Archived clients have no goal editor to host the history
+                // rows, so they get their own section.
+                Section {
+                    GoalHistoryRows(client: client)
+                }
             } else {
                 GoalEditorSection(client: client, editor: $goalEditor, focus: focusedField)
             }
 
             pacingSection
-
-            GoalHistoryView(client: client)
         }
         .formStyle(.grouped)
         .fileImporter(
@@ -562,15 +565,10 @@ private struct ClientDetailView: View {
 
             workHoursRow
 
-            VStack(alignment: .leading, spacing: 6) {
-                Text(pacingCaption)
-                    .fixedSize(horizontal: false, vertical: true)
-
-                Text("Work hours shape the day timeline: its plan line rises only between these times, so mornings before work carry no planned progress.")
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .font(.subheadline)
-            .foregroundStyle(.secondary)
+            Text(pacingCaption)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
@@ -579,7 +577,18 @@ private struct ClientDetailView: View {
     /// Hour/minute pickers only — the date part is pinned to a fixed anchor
     /// day, so the bindings read and write pure minutes-of-day.
     private var workHoursRow: some View {
-        centeredControlRow("Work hours") {
+        // Label with an inline subtitle: the caption defines this one control,
+        // so it lives in the row (System Settings style) rather than in the
+        // section's standalone caption block.
+        HStack(alignment: .center) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Work hours")
+                Text("The day timeline's plan line rises only between these times, so mornings before work carry no planned progress.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer()
             HStack(spacing: 6) {
                 DatePicker(
                     "Work hours start",

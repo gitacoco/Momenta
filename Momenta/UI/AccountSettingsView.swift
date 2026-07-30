@@ -92,7 +92,7 @@ struct AccountSettingsView: View {
             }
         } footer: {
             Text("Find the token in Toggl Track under Profile → API Token. It is stored only in the macOS Keychain.")
-                .font(.caption)
+                .font(.subheadline)
                 .foregroundStyle(.secondary)
         }
     }
@@ -172,7 +172,7 @@ struct AccountSettingsView: View {
             Text("iCloud Sync")
         } footer: {
             Text("iCloud Sync is temporarily disabled. Toggl credentials and client settings remain local to this Mac.")
-                .font(.caption)
+                .font(.subheadline)
                 .foregroundStyle(.secondary)
         }
     }
@@ -204,7 +204,7 @@ struct AccountSettingsView: View {
                     Text("\(discovered.fullname) · \(discovered.email)")
                         .foregroundStyle(.secondary)
                     Text("Confirm before this Mac uses the synced credential or downloads financial settings.")
-                        .font(.caption)
+                        .font(.subheadline)
                         .foregroundStyle(.secondary)
                     HStack {
                         Button("Use This Account") {
@@ -220,7 +220,7 @@ struct AccountSettingsView: View {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("This Mac and iCloud both have client settings.")
                     Text("Momenta will preserve non-conflicting clients and goal months; values already accepted by iCloud win same-field conflicts.")
-                        .font(.caption)
+                        .font(.subheadline)
                         .foregroundStyle(.secondary)
                     HStack {
                         Button("Merge with iCloud") {

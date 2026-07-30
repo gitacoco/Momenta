@@ -165,7 +165,7 @@ struct GoalEditorSection: View {
             if isHistoricalMonth {
                 HStack {
                     Text("Past-month changes are saved only after confirmation.")
-                        .font(.callout)
+                        .font(.subheadline)
                         .foregroundStyle(.secondary)
                     Spacer()
                     Button("Revert") {
@@ -195,6 +195,8 @@ struct GoalEditorSection: View {
                     .accessibilityHint("Asks for confirmation before changing historical goals")
                 }
             }
+
+            GoalHistoryRows(client: liveClient)
         } header: {
             HStack(alignment: .firstTextBaseline) {
                 VStack(alignment: .leading, spacing: 2) {
@@ -376,28 +378,28 @@ struct GoalEditorSection: View {
     }
 }
 
-/// Read-only, per-month record of goal versions.
-struct GoalHistoryView: View {
+/// Read-only, per-month record of goal versions: a collapsed disclosure row
+/// hosted at the bottom of the Monthly Goal section (or in its own section
+/// for archived clients, which have no editor).
+struct GoalHistoryRows: View {
     let client: ClientConfig
     @State private var expanded = false
 
     var body: some View {
-        Section {
-            DisclosureGroup("Goal History", isExpanded: $expanded) {
-                let months = client.goalHistory.keys.sorted(by: >)
-                if months.isEmpty {
-                    Text("No goals recorded yet.")
-                        .foregroundStyle(.secondary)
-                } else {
-                    ForEach(months, id: \.self) { month in
-                        if let goal = client.goalHistory[month] {
-                            LabeledContent(month.description) {
-                                Text(historyLine(goal))
-                                    .font(.callout.monospacedDigit())
-                                    .foregroundStyle(.secondary)
-                                    .multilineTextAlignment(.trailing)
-                                    .fixedSize(horizontal: false, vertical: true)
-                            }
+        DisclosureGroup("Goal History", isExpanded: $expanded) {
+            let months = client.goalHistory.keys.sorted(by: >)
+            if months.isEmpty {
+                Text("No goals recorded yet.")
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(months, id: \.self) { month in
+                    if let goal = client.goalHistory[month] {
+                        LabeledContent(month.description) {
+                            Text(historyLine(goal))
+                                .font(.callout.monospacedDigit())
+                                .foregroundStyle(.secondary)
+                                .multilineTextAlignment(.trailing)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
                     }
                 }
