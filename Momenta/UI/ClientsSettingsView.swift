@@ -585,26 +585,25 @@ private struct ClientDetailView: View {
     /// Hour/minute pickers only — the date part is pinned to a fixed anchor
     /// day, so the bindings read and write pure minutes-of-day.
     private var workHoursRow: some View {
-        HStack(spacing: 6) {
-            Text("Work hours")
-                .foregroundStyle(.secondary)
-                .padding(.trailing, 6)
-            DatePicker(
-                "Work hours start",
-                selection: windowMinuteBinding(\.startMinute),
-                displayedComponents: .hourAndMinute
-            )
-            .labelsHidden()
-            .fixedSize()
-            Text("to")
-                .foregroundStyle(.secondary)
-            DatePicker(
-                "Work hours end",
-                selection: windowMinuteBinding(\.endMinute),
-                displayedComponents: .hourAndMinute
-            )
-            .labelsHidden()
-            .fixedSize()
+        centeredControlRow("Work hours") {
+            HStack(spacing: 6) {
+                DatePicker(
+                    "Work hours start",
+                    selection: windowMinuteBinding(\.startMinute),
+                    displayedComponents: .hourAndMinute
+                )
+                .labelsHidden()
+                .fixedSize()
+                Text("to")
+                    .foregroundStyle(.secondary)
+                DatePicker(
+                    "Work hours end",
+                    selection: windowMinuteBinding(\.endMinute),
+                    displayedComponents: .hourAndMinute
+                )
+                .labelsHidden()
+                .fixedSize()
+            }
         }
     }
 
@@ -654,12 +653,11 @@ private struct ClientDetailView: View {
     /// One toggle per weekday, Monday-first to match the previews. At least
     /// one work day always stays selected — a goal needs a schedule.
     private var workDayPicker: some View {
-        HStack(spacing: 6) {
-            Text("Work days")
-                .foregroundStyle(.secondary)
-                .padding(.trailing, 6)
-            ForEach(0..<7, id: \.self) { index in
-                workDayToggle(index: index)
+        centeredControlRow("Work days") {
+            HStack(spacing: 6) {
+                ForEach(0..<7, id: \.self) { index in
+                    workDayToggle(index: index)
+                }
             }
         }
     }
