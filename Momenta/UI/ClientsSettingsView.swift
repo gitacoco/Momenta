@@ -539,44 +539,38 @@ private struct ClientDetailView: View {
     // MARK: Pacing (with preview)
 
     private var pacingSection: some View {
+        // Each row is a direct child of the Section so the grouped form draws
+        // its standard separators between them, like every other section.
         Section("Pacing") {
-            VStack(alignment: .leading, spacing: 0) {
-                ViewThatFits(in: .horizontal) {
-                    HStack(alignment: .top, spacing: 24) {
-                        Text("Planned progress on")
-                            .fixedSize()
-                        Spacer(minLength: 0)
-                        pacingOptions
-                    }
-
-                    VStack(alignment: .leading, spacing: 10) {
-                        Text("Planned progress on")
-                        pacingOptions
-                    }
-                }
-                .padding(.bottom, 14)
-
-                if currentPacing == .custom {
-                    workDayPicker
-                        .padding(.bottom, 14)
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .top, spacing: 24) {
+                    Text("Planned progress on")
+                        .fixedSize()
+                    Spacer(minLength: 0)
+                    pacingOptions
                 }
 
-                workHoursRow
-                    .padding(.bottom, 14)
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Planned progress on")
+                    pacingOptions
+                }
+            }
 
-                Divider()
+            if currentPacing == .custom {
+                workDayPicker
+            }
 
+            workHoursRow
+
+            VStack(alignment: .leading, spacing: 6) {
                 Text(pacingCaption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
-                    .padding(.top, 12)
 
                 Text("Work hours shape the day timeline: its plan line rises only between these times, so mornings before work carry no planned progress.")
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
-                    .padding(.top, 6)
             }
-            .padding(.vertical, 4)
         }
     }
 
