@@ -81,6 +81,19 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
                 hosting.trailingAnchor.constraint(equalTo: button.trailingAnchor),
                 hosting.centerYAnchor.constraint(equalTo: button.centerYAnchor),
                 hosting.heightAnchor.constraint(lessThanOrEqualTo: button.heightAnchor),
+                // The standard 22pt item height is only a priority-250 default
+                // inside NSStatusBarWindow, and the sub-point accessibility
+                // title leaves the button's own content hugging at that same
+                // priority — a tie the solver may break either way once the
+                // hosted label's constraints join in (17pt on a notched
+                // MacBook Air, 22pt on a Mac mini). The system renders the
+                // hover/selection capsule from the button's resolved bounds,
+                // so the shrunken solution shows a squashed, pointy-capped
+                // base beside standard items. A required floor at the standard
+                // thickness breaks the tie deterministically.
+                button.heightAnchor.constraint(
+                    greaterThanOrEqualToConstant: NSStatusBar.system.thickness
+                ),
             ])
             button.target = self
             button.action = #selector(handleClick)
