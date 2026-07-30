@@ -308,8 +308,6 @@ struct GoalEditorSection: View {
     ) -> some View {
         VStack(alignment: alignment, spacing: 4) {
             Text(title)
-                .font(.caption)
-                .foregroundStyle(.secondary)
             TextField(title, value: value, format: .number.precision(.fractionLength(0...2)))
                 .textFieldStyle(.roundedBorder)
                 .multilineTextAlignment(textAlignment)
