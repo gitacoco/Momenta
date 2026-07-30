@@ -197,6 +197,10 @@ struct ClientSelectorView: View {
                 .toggleStyle(.switch)
                 .controlSize(.mini)
                 .labelsHidden()
+                // An on switch is accent-filled, the same fill a focused row's
+                // selection paints behind it. Outline it there so the control
+                // keeps an edge of its own.
+                .modifier(SelectedRowOutline())
                 .accessibilityLabel("Show \(client.displayName) in Momenta")
                 .onKeyPress(.tab, phases: [.down]) { keyPress in
                     guard !keyPress.modifiers.contains(.shift) else {
@@ -233,6 +237,21 @@ struct ClientSelectorView: View {
             guard var updated = appState.config.client(id: client.id) else { return }
             updated.isEnabled = newValue
             appState.config.update(updated)
+        }
+    }
+}
+
+/// Traces a white edge around a control while it sits on the accent fill of a
+/// focused row's selection. A modifier rather than an inline overlay so the
+/// prominence is read inside the row, where the List sets it.
+private struct SelectedRowOutline: ViewModifier {
+    @Environment(\.backgroundProminence) private var backgroundProminence
+
+    func body(content: Content) -> some View {
+        content.overlay {
+            if backgroundProminence == .increased {
+                Capsule().strokeBorder(.white, lineWidth: 1)
+            }
         }
     }
 }
