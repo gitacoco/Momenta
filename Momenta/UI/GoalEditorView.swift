@@ -37,7 +37,6 @@ struct GoalEditorSection: View {
     var focus: FocusState<ClientField?>.Binding
 
     @State private var showRetroDialog = false
-    @State private var showHistoricalSaveDialog = false
     @State private var showUnsavedSwitchDialog = false
     @State private var pendingMonth: YearMonth?
 
@@ -187,7 +186,7 @@ struct GoalEditorSection: View {
 
             if isHistoricalMonth {
                 HStack {
-                    Text("Past-month changes are saved only after confirmation.")
+                    Text("Past-month changes are saved only when you click Save.")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                     Spacer()
@@ -195,8 +194,11 @@ struct GoalEditorSection: View {
                         resetDraft()
                     }
                     .disabled(!isDirty)
-                    Button("Save \(Format.monthName(month, timeZone: appState.timeZone)) Goal…") {
-                        showHistoricalSaveDialog = true
+                    // The explicit button is itself the confirmation: past
+                    // months never autosave, the month was chosen by hand, and
+                    // the edit reaches only that month.
+                    Button("Save \(Format.monthName(month, timeZone: appState.timeZone)) Goal") {
+                        saveHistoricalGoal()
                     }
                     .buttonStyle(.borderedProminent)
                     .disabled(!isDirty || draft.monthlyGoal == nil)
@@ -265,17 +267,6 @@ struct GoalEditorSection: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("The current rate and goal will overwrite this client's goal in every available past month. Normal edits never touch past months.")
-        }
-        .confirmationDialog(
-            "Save \(Format.monthTitle(month, timeZone: appState.timeZone)) goal?",
-            isPresented: $showHistoricalSaveDialog
-        ) {
-            Button("Save \(Format.monthName(month, timeZone: appState.timeZone)) Goal") {
-                saveHistoricalGoal()
-            }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("This records a goal version for \(Format.monthTitle(month, timeZone: appState.timeZone)) only. Later goals stay unchanged.")
         }
         .confirmationDialog(
             "Unsaved \(Format.monthTitle(month, timeZone: appState.timeZone)) changes",
