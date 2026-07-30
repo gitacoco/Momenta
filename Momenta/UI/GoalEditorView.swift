@@ -85,6 +85,15 @@ struct GoalEditorSection: View {
         editor.draft != GoalEditorState(client: liveClient, month: month).draft
     }
 
+    /// Scope note for edits to the current month; historical months explain
+    /// themselves in the section header and confirmation row instead.
+    private var goalScopeCaption: some View {
+        Text("Later months inherit this goal; past months stay unchanged.")
+            .font(.subheadline)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
     var body: some View {
         Section {
             LabeledContent("Goal month") {
@@ -102,7 +111,7 @@ struct GoalEditorSection: View {
             if !client.isBillable {
                 // Non-billable clients have no rate or revenue: a single hours
                 // target, as a standard label-left / field-right row.
-                LabeledContent("Hours") {
+                LabeledContent {
                     TextField("Hours", value: hoursBinding, format: .number.precision(.fractionLength(0...2)))
                         .textFieldStyle(.roundedBorder)
                         .multilineTextAlignment(.trailing)
@@ -110,8 +119,16 @@ struct GoalEditorSection: View {
                         .focused(focus, equals: .hours)
                         .labelsHidden()
                         .onSubmit(commitIfDirty)
+                } label: {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Hours")
+                        if !isHistoricalMonth {
+                            goalScopeCaption
+                        }
+                    }
                 }
             } else {
+            VStack(alignment: .leading, spacing: 8) {
             ViewThatFits(in: .horizontal) {
                 HStack(alignment: .bottom, spacing: 12) {
                     converterField(
@@ -159,6 +176,11 @@ struct GoalEditorSection: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
+
+            if !isHistoricalMonth {
+                goalScopeCaption
+            }
+            }
             .padding(.vertical, 2)
             }
 
@@ -203,12 +225,6 @@ struct GoalEditorSection: View {
                     Text("Monthly Goal")
                     if isHistoricalMonth {
                         Text("Editing \(Format.monthTitle(month, timeZone: appState.timeZone)); later months stay unchanged.")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                            .textCase(nil)
-                            .fixedSize(horizontal: false, vertical: true)
-                    } else {
-                        Text("Saves as you edit; changes apply from \(Format.monthTitle(month, timeZone: appState.timeZone)) onward.")
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                             .textCase(nil)

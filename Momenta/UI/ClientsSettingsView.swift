@@ -547,14 +547,22 @@ private struct ClientDetailView: View {
         Section("Pacing") {
             ViewThatFits(in: .horizontal) {
                 HStack(alignment: .top, spacing: 24) {
-                    plannedProgressLabel
+                    Text("Planned progress on")
+                        .fixedSize()
                     Spacer(minLength: 0)
-                    pacingOptions
+                    // The caption describes the selected option, so it sits
+                    // under the option cards, aligned with their column.
+                    VStack(alignment: .trailing, spacing: 8) {
+                        pacingOptions
+                        pacingSelectionCaption
+                            .multilineTextAlignment(.trailing)
+                    }
                 }
 
                 VStack(alignment: .leading, spacing: 10) {
-                    plannedProgressLabel
+                    Text("Planned progress on")
                     pacingOptions
+                    pacingSelectionCaption
                 }
             }
 
@@ -566,16 +574,11 @@ private struct ClientDetailView: View {
         }
     }
 
-    /// The row label plus an inline caption for the selected pacing option.
-    private var plannedProgressLabel: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text("Planned progress on")
-                .fixedSize()
-            Text(pacingCaption)
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-        }
+    private var pacingSelectionCaption: some View {
+        Text(pacingCaption)
+            .font(.subheadline)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
     }
 
     // MARK: Work hours
