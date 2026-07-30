@@ -363,14 +363,11 @@ private struct ClientDetailView: View {
                     )
                     .foregroundStyle(.secondary)
                 }
-                // Archived clients have no goal editor to host the history
-                // rows, so they get their own section.
-                Section {
-                    GoalHistoryRows(client: client)
-                }
             } else {
                 GoalEditorSection(client: client, editor: $goalEditor, focus: focusedField)
             }
+
+            GoalHistoryView(client: liveClient)
 
             pacingSection
         }

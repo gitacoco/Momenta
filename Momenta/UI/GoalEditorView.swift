@@ -127,6 +127,7 @@ struct GoalEditorSection: View {
                         }
                     }
                 }
+                .padding(.vertical, 2)
             } else {
             VStack(alignment: .leading, spacing: 8) {
             ViewThatFits(in: .horizontal) {
@@ -218,7 +219,6 @@ struct GoalEditorSection: View {
                 }
             }
 
-            GoalHistoryRows(client: liveClient)
         } header: {
             HStack(alignment: .firstTextBaseline) {
                 VStack(alignment: .leading, spacing: 2) {
@@ -306,7 +306,7 @@ struct GoalEditorSection: View {
         alignment: HorizontalAlignment,
         textAlignment: TextAlignment
     ) -> some View {
-        VStack(alignment: alignment, spacing: 4) {
+        VStack(alignment: alignment, spacing: 6) {
             Text(title)
             TextField(title, value: value, format: .number.precision(.fractionLength(0...2)))
                 .textFieldStyle(.roundedBorder)
@@ -392,28 +392,26 @@ struct GoalEditorSection: View {
     }
 }
 
-/// Read-only, per-month record of goal versions: a collapsed disclosure row
-/// hosted at the bottom of the Monthly Goal section (or in its own section
-/// for archived clients, which have no editor).
-struct GoalHistoryRows: View {
+/// Read-only, per-month record of goal versions. Its own section, so the
+/// recorded past reads as a separate card from the goal being edited.
+struct GoalHistoryView: View {
+    @Environment(AppState.self) private var appState
     let client: ClientConfig
-    @State private var expanded = false
+
+    private var months: [YearMonth] {
+        client.goalHistory.keys.sorted(by: >)
+    }
 
     var body: some View {
-        DisclosureGroup("Goal History", isExpanded: $expanded) {
-            let months = client.goalHistory.keys.sorted(by: >)
+        Section("Goal History") {
             if months.isEmpty {
                 Text("No goals recorded yet.")
                     .foregroundStyle(.secondary)
             } else {
                 ForEach(months, id: \.self) { month in
                     if let goal = client.goalHistory[month] {
-                        LabeledContent(month.description) {
-                            Text(historyLine(goal))
-                                .font(.callout.monospacedDigit())
-                                .foregroundStyle(.secondary)
-                                .multilineTextAlignment(.trailing)
-                                .fixedSize(horizontal: false, vertical: true)
+                        LabeledContent(Format.monthTitle(month, timeZone: appState.timeZone)) {
+                            goalSummary(goal)
                         }
                     }
                 }
@@ -421,13 +419,24 @@ struct GoalHistoryRows: View {
         }
     }
 
-    private func historyLine(_ goal: MonthlyGoal) -> String {
-        // Non-billable clients have no rate or revenue: hours only.
-        guard client.isBillable else {
-            return Format.hours(goal.hours)
-        }
-        let authored = goal.isAuthoredInHours ? "hours-led" : "revenue-led"
+    /// The goal itself on the value line, with the rate that produced it as a
+    /// caption beneath — the rate is context for the pair above, not a third
+    /// value competing with them on one run-on line.
+    @ViewBuilder
+    private func goalSummary(_ goal: MonthlyGoal) -> some View {
         let code = client.currency
-        return "\(Format.hours(goal.hours)) · \(Format.currency(goal.revenue, code: code)) @ \(Format.currency(goal.hourlyRate, code: code))/h · \(authored)"
+        VStack(alignment: .trailing, spacing: 2) {
+            if client.isBillable {
+                Text("\(Format.hours(goal.hours)) · \(Format.currency(goal.revenue, code: code))")
+                    .monospacedDigit()
+                Text("\(Format.currency(goal.hourlyRate, code: code))/h")
+                    .font(.subheadline.monospacedDigit())
+                    .foregroundStyle(.secondary)
+            } else {
+                // Non-billable clients have no rate or revenue: hours only.
+                Text(Format.hours(goal.hours))
+                    .monospacedDigit()
+            }
+        }
     }
 }
