@@ -367,9 +367,9 @@ private struct ClientDetailView: View {
                 GoalEditorSection(client: client, editor: $goalEditor, focus: focusedField)
             }
 
-            GoalHistoryView(client: liveClient)
-
             pacingSection
+
+            GoalHistoryView(client: liveClient)
         }
         .formStyle(.grouped)
         .fileImporter(

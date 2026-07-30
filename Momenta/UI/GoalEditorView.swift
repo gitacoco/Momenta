@@ -383,8 +383,8 @@ struct GoalEditorSection: View {
     }
 }
 
-/// Read-only, per-month record of goal versions. Its own section, so the
-/// recorded past reads as a separate card from the goal being edited.
+/// Read-only, per-month record of goal versions. The last section: a log of
+/// what was set, read after the settings that produce it.
 struct GoalHistoryView: View {
     @Environment(AppState.self) private var appState
     let client: ClientConfig
@@ -410,24 +410,15 @@ struct GoalHistoryView: View {
         }
     }
 
-    /// The goal itself on the value line, with the rate that produced it as a
-    /// caption beneath — the rate is context for the pair above, not a third
-    /// value competing with them on one run-on line.
-    @ViewBuilder
     private func goalSummary(_ goal: MonthlyGoal) -> some View {
         let code = client.currency
-        VStack(alignment: .trailing, spacing: 2) {
-            if client.isBillable {
-                Text("\(Format.hours(goal.hours)) · \(Format.currency(goal.revenue, code: code))")
-                    .monospacedDigit()
-                Text("\(Format.currency(goal.hourlyRate, code: code))/h")
-                    .font(.subheadline.monospacedDigit())
-                    .foregroundStyle(.secondary)
-            } else {
-                // Non-billable clients have no rate or revenue: hours only.
-                Text(Format.hours(goal.hours))
-                    .monospacedDigit()
-            }
-        }
+        // Non-billable clients have no rate or revenue: hours only.
+        let text = client.isBillable
+            ? "\(Format.hours(goal.hours)) · \(Format.currency(goal.revenue, code: code)) @ \(Format.currency(goal.hourlyRate, code: code))/h"
+            : Format.hours(goal.hours)
+        return Text(text)
+            .monospacedDigit()
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
     }
 }
