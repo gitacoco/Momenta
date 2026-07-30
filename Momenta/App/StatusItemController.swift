@@ -62,7 +62,7 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
             ])
 
             // SwiftUI renders the label so it live-updates with app state.
-            let hosting = NSHostingView(
+            let hosting = IntegralSizeHostingView(
                 rootView: MenuBarLabelContainer(
                     accessibilityValueChanged: { [weak button] value in
                         guard let button else { return }
@@ -472,6 +472,23 @@ func openSettingsWindow() {
 /// and the popover's transient dismissal behave normally.
 private final class PopoverAnchorView: NSView {
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
+}
+
+/// Reports the hosted label's ideal size rounded up to whole points. SwiftUI
+/// happily measures text at fractional widths, but the status item's width is
+/// pinned to this intrinsic size by required constraints while
+/// NSStatusBarWindow integralizes its frame — a fractional width (164.5pt was
+/// observed) leaves the layout engine re-deriving 164.5 against a 165pt
+/// window forever, until AppKit's recursion guard aborts the app at launch.
+/// Whole-point sizes keep both sides of that negotiation in agreement; the
+/// sub-point of slack is invisible at menu bar scale.
+private final class IntegralSizeHostingView<Content: View>: NSHostingView<Content> {
+    override var intrinsicContentSize: NSSize {
+        var size = super.intrinsicContentSize
+        if size.width.isFinite { size.width = ceil(size.width) }
+        if size.height.isFinite { size.height = ceil(size.height) }
+        return size
+    }
 }
 
 /// Thin wrapper so the status item label participates in SwiftUI observation.
