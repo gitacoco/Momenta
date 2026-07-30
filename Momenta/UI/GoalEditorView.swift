@@ -40,7 +40,6 @@ struct GoalEditorSection: View {
     @State private var showHistoricalSaveDialog = false
     @State private var showUnsavedSwitchDialog = false
     @State private var pendingMonth: YearMonth?
-    @State private var savedFeedback = false
 
     private let converterFieldWidth: CGFloat = 140
 
@@ -215,12 +214,6 @@ struct GoalEditorSection: View {
                     }
                 }
                 Spacer()
-                if savedFeedback {
-                    Label("Saved", systemImage: "checkmark")
-                        .font(.callout)
-                        .foregroundStyle(.green)
-                        .transition(.opacity)
-                }
             }
         }
         // Persist every complete draft change. Focus/submit hooks below remain
@@ -361,13 +354,11 @@ struct GoalEditorSection: View {
             retroactive: retroactive,
             historicalMonths: retroactive ? historicalMonths : []
         )
-        showSavedFeedback()
     }
 
     private func saveHistoricalGoal() {
         guard isHistoricalMonth, isDirty, let goal = draft.monthlyGoal else { return }
         appState.config.setGoalVersion(goal, forClient: client.id, at: month)
-        showSavedFeedback()
     }
 
     private func resetDraft() {
@@ -376,25 +367,12 @@ struct GoalEditorSection: View {
 
     private func switchToMonth(_ newMonth: YearMonth) {
         editor = GoalEditorState(client: liveClient, month: newMonth)
-        savedFeedback = false
     }
 
     private func completePendingMonthSwitch() {
         guard let pendingMonth else { return }
         self.pendingMonth = nil
         switchToMonth(pendingMonth)
-    }
-
-    private func showSavedFeedback() {
-        withAnimation {
-            savedFeedback = true
-        }
-        Task {
-            try? await Task.sleep(for: .seconds(2))
-            withAnimation {
-                savedFeedback = false
-            }
-        }
     }
 }
 
