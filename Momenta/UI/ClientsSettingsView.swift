@@ -661,7 +661,6 @@ private struct ClientDetailView: View {
             pacingOption(.calendarDays, title: "Every day")
             pacingOption(.custom, title: "Custom")
         }
-        .fixedSize(horizontal: true, vertical: false)
     }
 
     private func pacingOption(_ mode: PacingMode, title: LocalizedStringKey) -> some View {
@@ -840,8 +839,12 @@ private struct PacingOptionButton: View {
     var body: some View {
         Button(action: action) {
             VStack(spacing: 7) {
+                // The preview draws from its given size, so the card can give
+                // width back when the window is narrow instead of forcing the
+                // page past its share and overflowing the pane.
                 PacingWeekPreview(workIndices: workIndices, isSelected: isSelected)
-                    .frame(width: 142, height: 78)
+                    .frame(minWidth: 104, idealWidth: 142, maxWidth: 142)
+                    .frame(height: 78)
 
                 Text(title)
                     .font(.callout)
