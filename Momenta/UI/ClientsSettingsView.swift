@@ -551,11 +551,11 @@ private struct ClientDetailView: View {
                         .fixedSize()
                     Spacer(minLength: 0)
                     // The caption describes the selected option, so it sits
-                    // under the option cards, aligned with their column.
-                    VStack(alignment: .trailing, spacing: 8) {
+                    // under the option cards, sharing their column and reading
+                    // from that column's leading edge.
+                    VStack(alignment: .leading, spacing: 8) {
                         pacingOptions
                         pacingSelectionCaption
-                            .multilineTextAlignment(.trailing)
                     }
                 }
 
