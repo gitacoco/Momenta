@@ -407,36 +407,53 @@ struct DashboardView: View {
     // MARK: Footer
 
     private var footer: some View {
-        HStack(spacing: 8) {
-            if appState.isLoading {
-                ProgressView()
-                    .controlSize(.small)
-                Text("Refreshing…")
-                    .foregroundStyle(.secondary)
-            } else {
-                statusLine
+        // The outer stack carries no spacing of its own so the gap beside the
+        // spacer can be set independently of the gaps inside each group.
+        HStack(spacing: 0) {
+            HStack(spacing: 8) {
+                if appState.isLoading {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text("Refreshing…")
+                        .foregroundStyle(.secondary)
+                } else {
+                    statusLine
+                }
             }
-            Spacer()
-            Button {
-                // Manual refresh bypasses the throttle and refetches the
-                // selected historical month too.
-                Task { await appState.refresh(force: true) }
-            } label: {
-                Image(systemName: "arrow.clockwise")
-                    .imageScale(.large)
-            }
-            .buttonStyle(.borderless)
-            .disabled(appState.isLoading)
+            // Without this the stack hands the message and the spacer an
+            // equal share of the free width, so the message wraps with room
+            // still going spare. Priority sizes the message first; the spacer
+            // takes what is genuinely left.
+            .layoutPriority(1)
 
-            Button {
-                openSettingsWindow()
-            } label: {
-                Image(systemName: "gearshape")
-                    .imageScale(.large)
+            // Collapsible to nothing, with 4pt of its own on each side: a
+            // fully collapsed spacer still leaves 8pt between the message and
+            // the controls.
+            Spacer(minLength: 0)
+                .padding(.horizontal, 4)
+
+            HStack(spacing: 8) {
+                Button {
+                    // Manual refresh bypasses the throttle and refetches the
+                    // selected historical month too.
+                    Task { await appState.refresh(force: true) }
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                        .imageScale(.large)
+                }
+                .buttonStyle(.borderless)
+                .disabled(appState.isLoading)
+
+                Button {
+                    openSettingsWindow()
+                } label: {
+                    Image(systemName: "gearshape")
+                        .imageScale(.large)
+                }
+                .buttonStyle(.borderless)
+                .accessibilityLabel("Settings")
+                .accessibilityHint("Opens Momenta settings")
             }
-            .buttonStyle(.borderless)
-            .accessibilityLabel("Settings")
-            .accessibilityHint("Opens Momenta settings")
         }
         // One environment font sizes the whole strip: status text, error
         // icons, and the Reconnect button all follow it.
