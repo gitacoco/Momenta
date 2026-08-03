@@ -13,3 +13,7 @@ build/
 # Swift Package Manager
 .build/
 .swiftpm/
+
+# Throwaway app bundles built to capture the README screenshots, kept out of
+# the way of the real build products
+.codex-runtime/
