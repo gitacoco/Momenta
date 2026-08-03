@@ -75,7 +75,11 @@ struct OverallRowView: View {
             .font(.caption.weight(.semibold))
             .lineLimit(1)
 
-            Spacer(minLength: 8)
+            // No floor of its own: the stack's own 9pt on each side already
+            // separates the label from the figures, and a further 8pt was
+            // enough to truncate a six-figure summary that would otherwise
+            // have fit.
+            Spacer(minLength: 0)
 
             Text(summaryText)
                 .font(.callout.monospacedDigit())
