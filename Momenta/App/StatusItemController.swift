@@ -12,6 +12,10 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
     private let popover: NSPopover
     private var anchorWindow: NSWindow?
     private var dismissMonitors: [Any] = []
+    /// The hosting view that supplies the menu bar's pixels. Held so the width
+    /// negotiation can be re-driven when an input changes it without SwiftUI
+    /// noticing — see `invalidateLabelWidth()`.
+    private weak var labelHosting: NSView?
 
     init(appState: AppState) {
         self.appState = appState
@@ -64,14 +68,33 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
             // SwiftUI renders the label so it live-updates with app state.
             let hosting = IntegralSizeHostingView(
                 rootView: MenuBarLabelContainer(
-                    accessibilityValueChanged: { [weak button] value in
+                    accessibilityValueChanged: { [weak self, weak button] value in
                         guard let button else { return }
                         Self.updateStatusItemAccessibility(button, value: value)
+                        // The value changes for the same reasons the label's
+                        // width does, and rewriting the title re-measures the
+                        // cell — which is what the snapshot surfaces are sized
+                        // from. Re-publish the real width behind it.
+                        self?.invalidateLabelWidth()
+                    },
+                    visualWidthChanged: { [weak self] in
+                        self?.invalidateLabelWidth()
                     }
                 )
                 .environment(appState)
             )
             hosting.sizingOptions = [.intrinsicContentSize]
+            // The hosted label is `.fixedSize(horizontal:)`, so SwiftUI lays it
+            // out at its own ideal width and ignores whatever width the button
+            // hands it. Nothing else on this path clips — `clipsToBounds`
+            // defaults to false on macOS 14+ — so any disagreement between the
+            // drawn ideal and the reserved slot escapes the item: it overdraws
+            // the neighbouring menu-bar icons on the display that owns the real
+            // status window, and is cropped away in the snapshot the other
+            // display's menu bar mirrors. Clipping keeps a disagreement
+            // contained and visible on both, rather than destructive on one.
+            // A drawing property only: it cannot perturb the width negotiation.
+            hosting.clipsToBounds = true
             hosting.setContentHuggingPriority(.required, for: .horizontal)
             hosting.setContentCompressionResistancePriority(.required, for: .horizontal)
             hosting.translatesAutoresizingMaskIntoConstraints = false
@@ -98,7 +121,21 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
             button.target = self
             button.action = #selector(handleClick)
             button.sendAction(on: [.leftMouseUp, .rightMouseUp])
+            labelHosting = hosting
+
+            // Settle the width before the item is first shown. The menu bars on
+            // the other displays mirror this item through snapshot surfaces the
+            // system sizes when it first displays the item; they are not
+            // re-derived afterwards. Letting SwiftUI measure a turn later means
+            // those surfaces are built at the empty item's width and keep it,
+            // and the stale size flashes on every migration between displays.
+            button.layoutSubtreeIfNeeded()
+            Self.syncCellSize(button, to: hosting)
         }
+
+        #if DEBUG
+        startWidthInstrumentation()
+        #endif
 
         NotificationCenter.default.addObserver(
             self,
@@ -112,6 +149,84 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
             name: .momentaWillOpenSettings,
             object: nil
         )
+        // The reserved slot is derived once from the hosted label's intrinsic
+        // width and then never re-examined: there is no polling and no
+        // reconciliation, so a width that changes without an invalidation stays
+        // wrong silently. Display changes move the item between per-screen
+        // status windows, which is exactly when a stale width becomes visible.
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(screenConfigurationChanged),
+            name: NSApplication.didChangeScreenParametersNotification,
+            object: nil
+        )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(screenConfigurationChanged),
+            name: NSWindow.didChangeScreenNotification,
+            object: nil
+        )
+    }
+
+    /// Re-drives the width negotiation from scratch.
+    ///
+    /// Always deferred a turn. AppKit takes the other menu bars' snapshots by
+    /// drawing this view inside its own redraw pass and warns that dirtying
+    /// layout during drawing re-enters the measurement; hopping to the next
+    /// runloop turn keeps the invalidation out of any display pass. It also
+    /// preserves the non-feedback invariant that `IntegralSizeHostingView`'s
+    /// comment depends on: nothing here reads an assigned frame.
+    private func invalidateLabelWidth() {
+        DispatchQueue.main.async { [weak self] in
+            guard let self, let hosting = self.labelHosting else { return }
+            hosting.invalidateIntrinsicContentSize()
+            // Settle the new width before handing it to the cell, so the two
+            // sizing paths publish the same number in the same turn rather than
+            // the snapshot surfaces trailing a frame behind.
+            hosting.layoutSubtreeIfNeeded()
+            if let button = self.statusItem.button {
+                Self.syncCellSize(button, to: hosting)
+            }
+        }
+    }
+
+    @objc private func screenConfigurationChanged() {
+        invalidateLabelWidth()
+    }
+
+    /// The status item pads whatever the cell measures by this much before
+    /// sizing its snapshot surfaces. Measured, twice: a 9pt cell produced 25pt
+    /// surfaces and a 162pt cell produced 178pt ones. Not a documented value —
+    /// the instrumentation's mirror check is what catches it changing.
+    private static let statusItemCellInset: CGFloat = 16
+
+    /// Gives the button's cell the width the hosted label actually draws.
+    ///
+    /// The real status window sizes itself through Auto Layout, which sees the
+    /// hosting subview. The snapshot surfaces the other displays' menu bars
+    /// mirror are sized from the CELL, which sees only the transparent
+    /// accessibility title — 9pt, plus the inset above, hence the 25pt crop
+    /// that flashed across both bars whenever the item migrated between
+    /// displays. A clear image is the one width both paths agree on.
+    private static func syncCellSize(_ button: NSStatusBarButton, to hosting: NSView) {
+        let width = ceil(hosting.intrinsicContentSize.width)
+        guard width > 0 else { return }
+        let size = NSSize(
+            width: max(1, width - statusItemCellInset),
+            height: NSStatusBar.system.thickness
+        )
+        // Also the loop breaker: setting the image re-enters sizing, and
+        // bailing on an unchanged size is what stops it converging forever.
+        if let image = button.image, image.size == size { return }
+        // Drawn empty on purpose: the hosting view supplies every visible
+        // pixel. This exists only so the cell measures the right width.
+        let spacer = NSImage(size: size, flipped: false) { _ in true }
+        spacer.isTemplate = true
+        button.image = spacer
+        // Overlapping, not `.imageOnly`: the transparent attributed title has
+        // to keep being rendered for AppKit to expose it as the item's AXTitle,
+        // and overlapping takes the wider of the two rather than their sum.
+        button.imagePosition = .imageOverlaps
     }
 
     private static func statusItemAccessibilityTitle(value: String) -> String {
@@ -143,6 +258,99 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
     deinit {
         NotificationCenter.default.removeObserver(self)
     }
+
+    #if DEBUG
+    // MARK: Width instrumentation
+
+    /// Silent tripwire for the three invariants this status item's layout rests
+    /// on, sampled fast enough to catch a transient.
+    ///
+    /// 1. The label must draw inside the width it reports, because that width
+    ///    becomes the menu bar's reserved slot and nothing downstream clips it
+    ///    back. Breaking it overdraws the neighbouring item on the display that
+    ///    owns the real status window and is cropped away in the snapshot the
+    ///    other display's menu bar mirrors — the two halves of one bug.
+    /// 2. Every step of the negotiation must agree on one width. A slot left
+    ///    behind by a content change never re-derives on its own.
+    /// 3. Every status-bar window must be as wide as the item. The snapshot
+    ///    surfaces the other displays mirror are sized from the cell, not
+    ///    through Auto Layout, so they can disagree with a perfectly consistent
+    ///    item — which is exactly how the multi-display crop hid from 1 and 2.
+    ///
+    /// Nothing is logged while all three hold, so a recurrence is the only
+    /// thing that ever appears. The label animates over 0.28s with numeric-text
+    /// transitions, so the interval has to be well inside that: a half-second
+    /// poll samples the endpoints and can miss the whole excursion between.
+    private var widthProbeTimer: Timer?
+    private var lastWidthProbe: String = ""
+
+    private func startWidthInstrumentation() {
+        widthProbeTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 60, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.logWidthProbe() }
+        }
+    }
+
+    /// Union of every DESCENDANT layer's frame in `view`'s own coordinates.
+    /// Views alone are not enough: the ring's stroke is drawn by a shape layer
+    /// whose bounds already carry the half-line-width overshoot. The root layer
+    /// is excluded on purpose — it is the hosting view's own bounds, so
+    /// including it would define the overflow away.
+    private static func drawnExtent(of view: NSView) -> (rect: CGRect, layers: Int) {
+        guard let root = view.layer else { return (.null, 0) }
+        var rect = CGRect.null
+        var count = 0
+        func walk(_ layer: CALayer) {
+            for sublayer in layer.sublayers ?? [] {
+                count += 1
+                rect = rect.union(sublayer.convert(sublayer.bounds, to: root))
+                walk(sublayer)
+            }
+        }
+        walk(root)
+        return (rect, count)
+    }
+
+    private func logWidthProbe() {
+        guard let button = statusItem.button, let hosting = labelHosting else { return }
+        let demanded = ceil(hosting.intrinsicContentSize.width)
+        let (drawn, layers) = Self.drawnExtent(of: hosting)
+        let overflows = !drawn.isNull
+            && (drawn.minX < -0.01 || drawn.maxX > hosting.bounds.width + 0.01)
+        // The window is the slot the menu bar actually reserved. `demanded` is
+        // what the app asked for. A steady disagreement is a slot that never
+        // re-derived; the negotiation defers by one pass, so a single
+        // transitional frame of disagreement is normal and not worth a report.
+        let reserved = button.window?.frame.width ?? demanded
+        let stale = abs(reserved - demanded) > 0.01
+        // Every status-bar-class window this process owns. One is the real item;
+        // the rest carry the snapshot the other displays' menu bars mirror, and
+        // they are sized from the CELL rather than through Auto Layout. That
+        // second path is the one that broke: a cell measuring only the
+        // transparent accessibility title produced 25pt surfaces beside a 162pt
+        // item, and the crop flashed across both bars on every migration.
+        let bars = NSApp.windows
+            .filter { String(describing: type(of: $0)).contains("StatusBar") }
+            // A zero dimension is a window the system has created but not yet
+            // laid out; it reports a width no one is drawing through.
+            .filter { $0.frame.width > 0 && $0.frame.height > 0 }
+        let mirrors = bars.filter { abs($0.frame.width - reserved) > 0.01 }
+        guard overflows || stale || !mirrors.isEmpty else { return }
+
+        let line = """
+        \(overflows ? "OVERFLOW " : "")\(stale ? "STALE " : "")\
+        \(mirrors.isEmpty ? "" : "MIRROR ")\
+        demanded=\(demanded) reservedWindow=\(reserved) \
+        cell=\(button.cell?.cellSize.width ?? -1) image=\(button.image?.size.width ?? -1) \
+        screen=\(button.window?.screen?.localizedName ?? "nil") \
+        viz=\(appState.displaySettings.menuBarVisualization) layers=\(layers) \
+        drawn=[\(drawn.minX), \(drawn.maxX)] bounds=\(hosting.bounds.width) \
+        bars=[\(bars.map { "\(Int($0.frame.width))x\(Int($0.frame.height))" }.joined(separator: " "))]
+        """
+        guard line != lastWidthProbe else { return }
+        lastWidthProbe = line
+        NSLog("MOMENTA_WIDTH %@", line)
+    }
+    #endif
 
     // MARK: Interactions
 
@@ -487,6 +695,13 @@ private final class IntegralSizeHostingView<Content: View>: NSHostingView<Conten
         var size = super.intrinsicContentSize
         if size.width.isFinite { size.width = ceil(size.width) }
         if size.height.isFinite { size.height = ceil(size.height) }
+        // Fail here rather than at AppKit's recursion guard: a fractional width
+        // demanded at required priority is the launch-abort described above,
+        // and it aborts before any UI exists to say why.
+        assert(
+            !size.width.isFinite || size.width == size.width.rounded(.up),
+            "Status item demanded a fractional width (\(size.width)); see the launch-abort note above."
+        )
         return size
     }
 }
@@ -495,6 +710,9 @@ private final class IntegralSizeHostingView<Content: View>: NSHostingView<Conten
 private struct MenuBarLabelContainer: View {
     @Environment(AppState.self) private var appState
     let accessibilityValueChanged: (String) -> Void
+    /// Called for width-affecting changes that leave `accessibilityValue`
+    /// untouched, so they still reach the status item's sizing.
+    let visualWidthChanged: () -> Void
 
     private var accessibilityValue: String {
         MenuBarPresentation(
@@ -525,6 +743,13 @@ private struct MenuBarLabelContainer: View {
         }
         .onChange(of: accessibilityValue) { _, newValue in
             accessibilityValueChanged(newValue)
+        }
+        // Switching ring/waterline moves both the glyph's own width and the
+        // container's leading padding, but writes no new accessibility value —
+        // so the attributedTitle rewrite that normally dirties the button's
+        // sizing never happens and the reserved slot keeps the old width.
+        .onChange(of: appState.displaySettings.menuBarVisualization) { _, _ in
+            visualWidthChanged()
         }
     }
 }

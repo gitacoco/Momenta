@@ -228,6 +228,8 @@ struct MenuBarLabel: View {
 private struct RingProgressGlyph: View {
     @Environment(\.colorSchemeContrast) private var colorSchemeContrast
 
+    static let lineWidth: CGFloat = 2
+
     var fraction: Double?
     var monogram: String?
 
@@ -242,17 +244,29 @@ private struct RingProgressGlyph: View {
 
     var body: some View {
         ZStack {
+            // `strokeBorder`, not `stroke`: a stroke is centred on the path, so
+            // it lays half its width OUTSIDE the frame this glyph reports. The
+            // status item reserves its menu-bar slot from that reported width
+            // and nothing downstream clips, so ink outside it either overdraws
+            // the neighbouring item or is cropped away by the snapshot the
+            // other display's menu bar mirrors. Border strokes stay inside.
             Circle()
-                .stroke(Color.primary.opacity(trackOpacity), lineWidth: 2)
+                .strokeBorder(Color.primary.opacity(trackOpacity), lineWidth: Self.lineWidth)
 
             // Always mounted, even at zero: inserting the arc on the first
             // non-zero value would pop it in at full length instead of
             // sweeping there from the track.
+            //
+            // `inset(by:)` is the trimmable equivalent of `strokeBorder` —
+            // `trim` needs a Shape, which `strokeBorder` no longer is. The
+            // round cap only overshoots along the tangent, so the radial inset
+            // is what keeps the whole arc inside.
             Circle()
+                .inset(by: Self.lineWidth / 2)
                 .trim(from: 0, to: clampedFraction)
                 .stroke(
                     Color.primary,
-                    style: StrokeStyle(lineWidth: 2, lineCap: .round)
+                    style: StrokeStyle(lineWidth: Self.lineWidth, lineCap: .round)
                 )
                 .rotationEffect(.degrees(-90))
                 .animation(MenuBarMetrics.valueChange, value: clampedFraction)
@@ -262,6 +276,9 @@ private struct RingProgressGlyph: View {
                     .font(.system(size: 8, weight: .semibold, design: .rounded))
                     .foregroundStyle(.primary)
                     .minimumScaleFactor(0.7)
+                    // Bounded so a wide uppercase monogram scales down inside
+                    // the ring instead of widening the glyph past its frame.
+                    .frame(width: MenuBarMetrics.glyphSize - Self.lineWidth * 2)
             }
         }
         // The fill's `.animation(value:)` would otherwise also capture
