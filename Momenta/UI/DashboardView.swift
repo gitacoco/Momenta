@@ -1,16 +1,23 @@
 import SwiftUI
 
-/// The tallest client row currently in the list.
+/// How many client rows the list is showing, and how tall the tallest is.
 ///
 /// A preference rather than per-row state: SwiftUI recomputes it from scratch
-/// on every layout pass, so the maximum falls back down when the period switches
-/// to shorter cards or the tallest client is disabled. A running `max` held in
-/// state would only ever grow.
-private struct TallestCardHeightKey: PreferenceKey {
-    static let defaultValue: CGFloat = 0
+/// on every layout pass, so both fall back down when the period switches to
+/// shorter cards or a client is disabled. A running `max` held in state would
+/// only ever grow.
+private struct CardMetrics: Equatable {
+    var tallest: CGFloat = 0
+    var count: Int = 0
+}
 
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = max(value, nextValue())
+private struct CardMetricsKey: PreferenceKey {
+    static let defaultValue = CardMetrics()
+
+    static func reduce(value: inout CardMetrics, nextValue: () -> CardMetrics) {
+        let next = nextValue()
+        value.tallest = max(value.tallest, next.tallest)
+        value.count += next.count
     }
 }
 
@@ -19,7 +26,10 @@ private extension View {
     func measuredAsClientCard() -> some View {
         background(
             GeometryReader { proxy in
-                Color.clear.preference(key: TallestCardHeightKey.self, value: proxy.size.height)
+                Color.clear.preference(
+                    key: CardMetricsKey.self,
+                    value: CardMetrics(tallest: proxy.size.height, count: 1)
+                )
             }
         )
     }
@@ -35,12 +45,13 @@ struct DashboardView: View {
     @State private var headerHeight: CGFloat = 0
     @State private var footerHeight: CGFloat = 0
 
-    /// Measured heights of the scroll area's own parts. The cap promises a
-    /// number of client cards, so it has to be built from what a card and the
-    /// Overall row actually render as — a written-down estimate goes stale the
-    /// moment a card's metrics row, chart gutters, or fonts change.
-    @State private var overallRowHeight: CGFloat = 0
-    @State private var tallestCardHeight: CGFloat = 0
+    /// The scroll content's own natural height, and what the client rows
+    /// contribute to it. The cap promises a number of cards, so it is taken by
+    /// subtraction from the whole rather than assembled from a list of parts:
+    /// an assembled total silently omits whatever it does not enumerate, and
+    /// the warning banners above the list are exactly that.
+    @State private var naturalContentHeight: CGFloat = 0
+    @State private var cardMetrics = CardMetrics()
 
     /// Allowance for the popover parts outside this view: the arrow plus the
     /// system's margins against the menu bar and screen edges.
@@ -54,19 +65,22 @@ struct DashboardView: View {
     private static let contentInset: CGFloat = 12
     private static let overallRowTopPadding: CGFloat = 2
 
-    /// The height a list of exactly `cardsBeforeScrolling` cards occupies,
-    /// derived from the measured parts rather than estimated beside them.
+    /// The height this same content would occupy with only
+    /// `cardsBeforeScrolling` client rows in it.
     ///
-    /// Before the first measurement arrives there is nothing to derive from,
+    /// Taken from the measured whole by removing the rows past that count,
+    /// so everything else the list happens to be showing — the Overall row,
+    /// the uncategorized-hours warning, the missing-data and non-billable
+    /// banners, anything added later — is already accounted for without being
+    /// named here. Naming the parts is what let the banners fall out.
+    ///
+    /// Before the first measurement arrives there is nothing to subtract from,
     /// so fall back to a height that clears four cards at system font sizes.
     private var preferredContentHeight: CGFloat {
-        guard tallestCardHeight > 0 else { return 860 }
-        let cards = CGFloat(Self.cardsBeforeScrolling)
-        return Self.contentInset * 2
-            + Self.overallRowTopPadding
-            + overallRowHeight
-            // One gap per card: Overall to the first, then between the rest.
-            + cards * (tallestCardHeight + Self.cardSpacing)
+        guard naturalContentHeight > 0, cardMetrics.tallest > 0 else { return 860 }
+        let surplus = max(0, cardMetrics.count - Self.cardsBeforeScrolling)
+        return naturalContentHeight
+            - CGFloat(surplus) * (cardMetrics.tallest + Self.cardSpacing)
     }
 
     /// The content remains scrollable for long client lists, but shorter
@@ -254,11 +268,6 @@ struct DashboardView: View {
                             }
                         )
                         .padding(.top, Self.overallRowTopPadding)
-                        .onGeometryChange(for: CGFloat.self, of: { $0.size.height }) {
-                            // Measured without the top padding the cap adds
-                            // back, so the two can't double-count it.
-                            overallRowHeight = $0 - Self.overallRowTopPadding
-                        }
                     }
                     if appState.selectedSnapshot == nil {
                         dataUnavailableBanner
@@ -301,9 +310,17 @@ struct DashboardView: View {
                     }
                 }
                 .padding(Self.contentInset)
+                // The scroll content reports its natural height here: a
+                // vertical scroll view proposes unbounded height to its
+                // content, so this is what the list wants and not what the cap
+                // is currently allowing it. That is what keeps the cap from
+                // feeding on its own output.
+                .onGeometryChange(for: CGFloat.self, of: { $0.size.height }) {
+                    naturalContentHeight = $0
+                }
             }
-            .onPreferenceChange(TallestCardHeightKey.self) { height in
-                tallestCardHeight = height
+            .onPreferenceChange(CardMetricsKey.self) { metrics in
+                cardMetrics = metrics
             }
         // The frame caps long lists. `fixedSize` then asks the scroll
         // view for its ideal height, so short lists fit their content
