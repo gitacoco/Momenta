@@ -394,6 +394,10 @@ private struct ClientDetailView: View {
             GoalHistoryView(client: liveClient)
         }
         .formStyle(.grouped)
+        // Keep the nested editor below the window toolbar. A flush Form is
+        // treated as a full-pane scroll background and creates a hoverable
+        // titlebar pocket over only this column.
+        .padding(.top, 1)
         .fileImporter(
             isPresented: $showLogoImporter,
             allowedContentTypes: [.image]
