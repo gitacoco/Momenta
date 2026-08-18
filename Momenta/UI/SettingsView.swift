@@ -73,6 +73,12 @@ struct SettingsView: View {
     private let primarySidebarWidth = SettingsMetrics.primarySidebar
     private let clientSelectorWidth = SettingsMetrics.clientSelector
 
+    private var clientSelectorReservedWidth: CGFloat {
+        SettingsMetrics.selectorLeadingInset
+            + clientSelectorWidth
+            + SettingsMetrics.selectorTrailingInset
+    }
+
     private var currentSection: Section {
         selection ?? .account
     }
@@ -132,7 +138,18 @@ struct SettingsView: View {
     /// this page rather than becoming another navigation split column, so it
     /// cannot resize, collapse, or disturb the persistent primary sidebar.
     private var clientsWorkspace: some View {
-        HStack(spacing: 0) {
+        ZStack(alignment: .leading) {
+            // The editor owns the whole settings page so its scroll background
+            // participates in the window toolbar exactly like Account and
+            // Display. Its content margin leaves room for the page-local
+            // selector layered above it.
+            ClientDetailColumn(
+                selectedClientID: selectedClientID,
+                contentLeadingInset: clientSelectorReservedWidth,
+                focusedField: $clientDetailFocus
+            )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+
             ClientSelectorView(
                 selectedClientID: $selectedClientID,
                 onMoveFocusToDetail: { clientID in
@@ -151,19 +168,6 @@ struct SettingsView: View {
                 .padding(.leading, SettingsMetrics.selectorLeadingInset)
                 .padding(.vertical, 16)
                 .padding(.trailing, SettingsMetrics.selectorTrailingInset)
-
-            // The window minimum is this figure plus everything to its left,
-            // so the editor is guaranteed its share and never has to overflow
-            // the pane to lay itself out.
-            ClientDetailColumn(
-                selectedClientID: selectedClientID,
-                focusedField: $clientDetailFocus
-            )
-                .frame(
-                    minWidth: SettingsMetrics.clientEditorMinimum,
-                    maxWidth: .infinity,
-                    maxHeight: .infinity
-                )
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }

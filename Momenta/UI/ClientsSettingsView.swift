@@ -265,6 +265,7 @@ private struct SelectedRowOutline: ViewModifier {
 struct ClientDetailColumn: View {
     @Environment(AppState.self) private var appState
     let selectedClientID: Int?
+    let contentLeadingInset: CGFloat
     var focusedField: FocusState<ClientField?>.Binding
 
     private var isMultiWorkspace: Bool {
@@ -278,15 +279,30 @@ struct ClientDetailColumn: View {
                     client: client,
                     initialGoalMonth: appState.currentMonth,
                     showsWorkspace: isMultiWorkspace,
+                    contentLeadingInset: contentLeadingInset,
                     focusedField: focusedField
                 )
                     .id(id) // reset editor state when switching clients
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             } else {
-                ContentUnavailableView {
-                    Label("Select a Client", systemImage: "person.crop.rectangle")
-                } description: {
-                    Text("Pick a client to configure its profile and goal.")
+                ZStack {
+                    // Preserve the same full-page seamless background as a
+                    // selected client's Form without making the placeholder
+                    // itself scroll or participate in its sizing.
+                    Form { EmptyView() }
+                        .formStyle(.grouped)
+                        .contentMargins(
+                            .leading,
+                            contentLeadingInset,
+                            for: .scrollContent
+                        )
+
+                    ContentUnavailableView {
+                        Label("Select a Client", systemImage: "person.crop.rectangle")
+                    } description: {
+                        Text("Pick a client to configure its profile and goal.")
+                    }
+                    .offset(x: contentLeadingInset / 2)
                 }
             }
         }
@@ -303,6 +319,7 @@ private struct ClientDetailView: View {
     @Environment(AppState.self) private var appState
     let client: ClientConfig
     let showsWorkspace: Bool
+    let contentLeadingInset: CGFloat
     @State private var goalEditor: GoalEditorState
     @State private var showLogoImporter = false
     @State private var logoImportError: String?
@@ -312,10 +329,12 @@ private struct ClientDetailView: View {
         client: ClientConfig,
         initialGoalMonth: YearMonth,
         showsWorkspace: Bool,
+        contentLeadingInset: CGFloat,
         focusedField: FocusState<ClientField?>.Binding
     ) {
         self.client = client
         self.showsWorkspace = showsWorkspace
+        self.contentLeadingInset = contentLeadingInset
         self.focusedField = focusedField
         _goalEditor = State(initialValue: GoalEditorState(client: client, month: initialGoalMonth))
     }
@@ -394,10 +413,7 @@ private struct ClientDetailView: View {
             GoalHistoryView(client: liveClient)
         }
         .formStyle(.grouped)
-        // Keep the nested editor below the window toolbar. A flush Form is
-        // treated as a full-pane scroll background and creates a hoverable
-        // titlebar pocket over only this column.
-        .padding(.top, 1)
+        .contentMargins(.leading, contentLeadingInset, for: .scrollContent)
         .fileImporter(
             isPresented: $showLogoImporter,
             allowedContentTypes: [.image]
