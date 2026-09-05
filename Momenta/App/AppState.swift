@@ -941,6 +941,15 @@ final class AppState {
         var progressByClientID: [Int: ClientProgress]
         var sliceByClientID: [Int: ClientPeriodSlice]
         var overall: AggregateProgress?
+
+        /// Follow the cards' day-off status while preserving the configured
+        /// order within each group, including setup and unavailable rows.
+        func orderedClients(_ clients: [ClientConfig], period: AggregationPeriod) -> [ClientConfig] {
+            guard period == .day else { return clients }
+            let workingClients = clients.filter { sliceByClientID[$0.id]?.isRestDay != true }
+            let restingClients = clients.filter { sliceByClientID[$0.id]?.isRestDay == true }
+            return workingClients + restingClients
+        }
     }
 
     /// The popover's completeness gate. Day/month satisfy it structurally

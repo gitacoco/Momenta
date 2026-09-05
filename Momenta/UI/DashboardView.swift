@@ -283,7 +283,7 @@ struct DashboardView: View {
                     // Every enabled client gets a row — data (including
                     // rate-backfilled historical months), a setup prompt, or
                     // an explicit reason why there's nothing to show.
-                    ForEach(appState.visibleClientsForUnit) { client in
+                    ForEach(data.orderedClients(appState.visibleClientsForUnit, period: period)) { client in
                         if let card = cardData(client, period: period, monthProgress: data.progressByClientID, slices: data.sliceByClientID) {
                             ClientCardView(
                                 data: card,
