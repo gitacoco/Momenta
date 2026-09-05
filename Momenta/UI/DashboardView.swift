@@ -1,40 +1,5 @@
 import SwiftUI
 
-/// How many client rows the list is showing, and how tall the tallest is.
-///
-/// A preference rather than per-row state: SwiftUI recomputes it from scratch
-/// on every layout pass, so both fall back down when the period switches to
-/// shorter cards or a client is disabled. A running `max` held in state would
-/// only ever grow.
-private struct CardMetrics: Equatable {
-    var tallest: CGFloat = 0
-    var count: Int = 0
-}
-
-private struct CardMetricsKey: PreferenceKey {
-    static let defaultValue = CardMetrics()
-
-    static func reduce(value: inout CardMetrics, nextValue: () -> CardMetrics) {
-        let next = nextValue()
-        value.tallest = max(value.tallest, next.tallest)
-        value.count += next.count
-    }
-}
-
-private extension View {
-    /// Reports this row's height towards the popover's card-count cap.
-    func measuredAsClientCard() -> some View {
-        background(
-            GeometryReader { proxy in
-                Color.clear.preference(
-                    key: CardMetricsKey.self,
-                    value: CardMetrics(tallest: proxy.size.height, count: 1)
-                )
-            }
-        )
-    }
-}
-
 /// Popover content: month navigation, unit toggle, client cards, warnings.
 struct DashboardView: View {
     @Environment(AppState.self) private var appState
@@ -45,61 +10,24 @@ struct DashboardView: View {
     @State private var headerHeight: CGFloat = 0
     @State private var footerHeight: CGFloat = 0
 
-    /// The scroll content's own natural height, and what the client rows
-    /// contribute to it. The cap promises a number of cards, so it is taken by
-    /// subtraction from the whole rather than assembled from a list of parts:
-    /// an assembled total silently omits whatever it does not enumerate, and
-    /// the warning banners above the list are exactly that.
-    @State private var naturalContentHeight: CGFloat = 0
-    @State private var cardMetrics = CardMetrics()
-
     /// Allowance for the popover parts outside this view: the arrow plus the
     /// system's margins against the menu bar and screen edges.
     private static let popoverArrowAllowance: CGFloat = 30
 
-    /// How many client cards the popover shows before the list starts to
-    /// scroll. Four is the working set most people keep enabled at once.
-    private static let cardsBeforeScrolling = 4
-    /// Must match the scroll content's `VStack` spacing and `padding`.
+    /// Spacing and insets for the scroll content.
     private static let cardSpacing: CGFloat = 10
     private static let contentInset: CGFloat = 12
     private static let overallRowTopPadding: CGFloat = 2
 
-    /// The height this same content would occupy with only
-    /// `cardsBeforeScrolling` client rows in it.
-    ///
-    /// Taken from the measured whole by removing the rows past that count,
-    /// so everything else the list happens to be showing — the Overall row,
-    /// the uncategorized-hours warning, the missing-data and non-billable
-    /// banners, anything added later — is already accounted for without being
-    /// named here. Naming the parts is what let the banners fall out.
-    ///
-    /// Before the first measurement arrives there is nothing to subtract from,
-    /// so fall back to a height that clears four cards at system font sizes.
-    private var preferredContentHeight: CGFloat {
-        guard naturalContentHeight > 0, cardMetrics.tallest > 0 else { return 860 }
-        let surplus = max(0, cardMetrics.count - Self.cardsBeforeScrolling)
-        return naturalContentHeight
-            - CGFloat(surplus) * (cardMetrics.tallest + Self.cardSpacing)
-    }
-
-    /// The content remains scrollable for long client lists, but shorter
-    /// lists report their natural height to the hosting controller.
-    ///
-    /// The cap sits at whatever four cards plus the Overall row measure, and is
-    /// clamped to the status item's screen so a taller list can't grow the
-    /// popover past the display it opens on.
-    private var maximumContentHeight: CGFloat {
-        let preferred = preferredContentHeight
-        let chrome = headerHeight + footerHeight + 2 + Self.popoverArrowAllowance
+    /// Every period and card style shares the available screen height as its
+    /// upper limit. The scroll view's ideal height lets shorter content fit
+    /// naturally, including lists with compact day-off cards.
+    private var maximumContentHeight: CGFloat? {
         guard let screenHeight = appState.statusItemScreenVisibleHeight
             ?? (NSScreen.main ?? NSScreen.screens.first)?.visibleFrame.height
-        else { return preferred }
-        // No lower floor: a floor would be the one case that breaks the
-        // promise this cap exists for. Real Macs leave 600pt+ after the
-        // measured chrome, so it would only ever engage on a display where
-        // honouring it means overflowing the screen.
-        return max(0, min(preferred, screenHeight - chrome))
+        else { return nil }
+        let chrome = headerHeight + footerHeight + 2 + Self.popoverArrowAllowance
+        return max(0, screenHeight - chrome)
     }
 
     var body: some View {
@@ -302,30 +230,16 @@ struct DashboardView: View {
                                         openSettingsWindow()
                                     }
                                 )
-                                .measuredAsClientCard()
                             } else if client.state(for: appState.selectedMonth) == .needsSetup {
                                 setupCard(client)
-                                    .measuredAsClientCard()
                             } else if client.state(for: appState.selectedMonth) == .configured {
                                 noDataCard(client)
-                                    .measuredAsClientCard()
                             }
                         }
                         .modifier(ClientCardPlacement(order: clientOrder))
                     }
                 }
                 .padding(Self.contentInset)
-                // The scroll content reports its natural height here: a
-                // vertical scroll view proposes unbounded height to its
-                // content, so this is what the list wants and not what the cap
-                // is currently allowing it. That is what keeps the cap from
-                // feeding on its own output.
-                .onGeometryChange(for: CGFloat.self, of: { $0.size.height }) {
-                    naturalContentHeight = $0
-                }
-            }
-            .onPreferenceChange(CardMetricsKey.self) { metrics in
-                cardMetrics = metrics
             }
         // The frame caps long lists. `fixedSize` then asks the scroll
         // view for its ideal height, so short lists fit their content

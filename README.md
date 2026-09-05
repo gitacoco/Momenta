@@ -130,6 +130,8 @@ The dashboard adds:
 - An Overall row and one card per enabled client, with setup, missing-data,
   stale-cache, quota, and uncategorized-time states shown explicitly.
 - Direct links from incomplete cards to the corresponding client settings.
+- A panel that fits its content up to the available screen height, with the
+  same limit for every period and card style. Longer lists scroll.
 
 ### Period views and goal semantics
 
