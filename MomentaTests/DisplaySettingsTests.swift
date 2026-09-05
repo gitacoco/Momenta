@@ -137,6 +137,53 @@ struct DisplaySettingsTests {
         #expect(legacy.aggregationPeriod == .day)
     }
 
+    @Test func periodCardStylesPersistIndependently() throws {
+        for period in AggregationPeriod.allCases {
+            var settings = DisplaySettings()
+            settings.aggregationPeriod = period
+            settings.cardViewStyle = settings.cardViewStyle == .capsule ? .timeline : .capsule
+
+            let decoded = try JSONDecoder().decode(
+                DisplaySettings.self,
+                from: JSONEncoder().encode(settings)
+            )
+            #expect(decoded == settings)
+            #expect(decoded.dayViewStyle == (period == .day ? .timeline : .capsule))
+            #expect(decoded.weekViewStyle == (period == .week ? .capsule : .timeline))
+            #expect(decoded.monthViewStyle == (period == .month ? .capsule : .timeline))
+
+            var switched = decoded
+            for selectedPeriod in AggregationPeriod.allCases {
+                switched.aggregationPeriod = selectedPeriod
+                switch selectedPeriod {
+                case .day: #expect(switched.cardViewStyle == decoded.dayViewStyle)
+                case .week: #expect(switched.cardViewStyle == decoded.weekViewStyle)
+                case .month: #expect(switched.cardViewStyle == decoded.monthViewStyle)
+                }
+            }
+        }
+    }
+
+    @Test func legacyCardStylesPreserveTheDaySelectionAndExistingCharts() throws {
+        let settings = try JSONDecoder().decode(
+            DisplaySettings.self,
+            from: Data(#"{"dayViewStyle":"timeline","aggregationPeriod":"week"}"#.utf8)
+        )
+        #expect(settings.dayViewStyle == .timeline)
+        #expect(settings.weekViewStyle == .timeline)
+        #expect(settings.monthViewStyle == .timeline)
+    }
+
+    @Test func invalidCardStyleDoesNotResetOtherPeriods() throws {
+        let settings = try JSONDecoder().decode(
+            DisplaySettings.self,
+            from: Data(#"{"dayViewStyle":"timeline","weekViewStyle":"unknown","monthViewStyle":"capsule"}"#.utf8)
+        )
+        #expect(settings.dayViewStyle == .timeline)
+        #expect(settings.weekViewStyle == .timeline)
+        #expect(settings.monthViewStyle == .capsule)
+    }
+
     @Test func refreshModeAndIntervalRoundTrip() throws {
         var settings = DisplaySettings()
         settings.refreshMode = .interval

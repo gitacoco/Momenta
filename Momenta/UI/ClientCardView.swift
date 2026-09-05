@@ -571,9 +571,8 @@ private struct AnimatedPeriodChartHost<Content: View>: View {
     }
 }
 
-/// One client's progress card. Month and week render a cumulative planned-vs-
-/// actual chart; day renders a bullet bar of the day's hours against the
-/// catch-up pace. All three share the header, goal chip, and delta styling.
+/// One client's progress as a cumulative timeline or a capsule against the
+/// period goal. All periods share the header, goal chip, and delta styling.
 struct ClientCardView: View {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.colorSchemeContrast) private var colorSchemeContrast
@@ -581,10 +580,7 @@ struct ClientCardView: View {
 
     var data: ClientCardData
     var unit: DisplayUnit
-    /// How a day card renders: the bullet capsule against the day pace, or
-    /// the intraday timeline whose plan ramps inside the work window. Ignored
-    /// by week and month cards.
-    var dayStyle: DayViewStyle = .capsule
+    var cardStyle: ClientCardStyle
     /// Whether the shown period contains "now". A back-stepped past period
     /// keeps its endpoint value label but drops the marker dot — the dot is
     /// a live-edge cue, and a finished week/month has no live edge.
@@ -626,7 +622,7 @@ struct ClientCardView: View {
     /// chart model and the layout from disagreeing about what is drawn.
     private var drawsDayTimeline: Bool {
         guard case .day(let slice) = data else { return false }
-        return dayStyle == .timeline && !slice.isRestDay && !slice.points.isEmpty
+        return cardStyle == .timeline && !slice.isRestDay && !slice.points.isEmpty
     }
 
     private var clientColor: Color {
@@ -683,8 +679,29 @@ struct ClientCardView: View {
                 case .day(let slice):
                     dayTimelineMetrics(slice)
                 }
-            } else if case .day(let slice) = data {
-                dayBullet(slice)
+            } else {
+                switch data {
+                case .month(let progress):
+                    progressCapsule(
+                        actualHours: progress.actualHours,
+                        actualRevenue: progress.actualRevenue,
+                        targetHours: progress.goal?.hours,
+                        targetRevenue: progress.goal?.revenue
+                    )
+                    monthMetrics(progress)
+                        .padding(.top, 2)
+                case .week(let slice):
+                    progressCapsule(
+                        actualHours: slice.actualHours,
+                        actualRevenue: slice.actualRevenue,
+                        targetHours: slice.targetHours,
+                        targetRevenue: slice.targetRevenue
+                    )
+                    weekMetrics(slice)
+                        .padding(.top, 2)
+                case .day(let slice):
+                    dayBullet(slice)
+                }
             }
         }
         .padding(12)
@@ -697,7 +714,7 @@ struct ClientCardView: View {
     private var bodyIsChart: Bool {
         switch data {
         case .day: return drawsDayTimeline
-        case .month, .week: return true
+        case .month, .week: return cardStyle == .timeline
         }
     }
 
@@ -775,10 +792,11 @@ struct ClientCardView: View {
         }
     }
 
-    // MARK: Chart (month + week)
+    // MARK: Chart
 
     private var chartModel: PeriodChartModel? {
-        switch data {
+        guard bodyIsChart else { return nil }
+        return switch data {
         case .month(let progress):
             makeChartModel(
                 period: .month,
@@ -1129,8 +1147,12 @@ struct ClientCardView: View {
 
     /// No goal for the day (rate-backfilled history): just the logged time.
     private func loggedOnlyRow(_ slice: ClientPeriodSlice) -> some View {
+        loggedOnlyRow(hours: slice.actualHours, revenue: slice.actualRevenue)
+    }
+
+    private func loggedOnlyRow(hours: Decimal, revenue: Decimal) -> some View {
         HStack {
-            Text(unitText(hours: slice.actualHours, revenue: slice.actualRevenue))
+            Text(unitText(hours: hours, revenue: revenue))
                 .font(.title3.weight(.semibold).monospacedDigit())
             Text("logged")
                 .font(.callout)
@@ -1139,37 +1161,69 @@ struct ClientCardView: View {
         }
     }
 
+    /// The fill compares actual work with the whole period's target. Week
+    /// values may span different rates, so the fraction follows the h/$ unit.
+    @ViewBuilder
+    private func progressCapsule(
+        actualHours: Decimal,
+        actualRevenue: Decimal,
+        targetHours: Decimal?,
+        targetRevenue: Decimal?
+    ) -> some View {
+        let actual = unit == .hours ? actualHours : actualRevenue
+        let target = unit == .hours ? targetHours : targetRevenue
+        if let target, target > 0 {
+            let fraction = min(max((actual / target).doubleValue, 0), 1)
+            let label = unitText(hours: actualHours, revenue: actualRevenue)
+            let font = NSFont.monospacedDigitSystemFont(
+                ofSize: NSFont.preferredFont(forTextStyle: .caption1).pointSize,
+                weight: .bold
+            )
+            let labelWidth = ceil((label as NSString).size(withAttributes: [.font: font]).width) + 16
+            GeometryReader { proxy in
+                let fillWidth = min(proxy.size.width, max(proxy.size.width * fraction, labelWidth))
+                ZStack(alignment: .leading) {
+                    Capsule()
+                        .fill(Color.primary.opacity(0.08))
+                    if fraction > 0 {
+                        Capsule()
+                            .fill(clientColor)
+                            .frame(width: fillWidth)
+                            .overlay(alignment: .trailing) {
+                                Text(label)
+                                    .font(.caption.weight(.bold).monospacedDigit())
+                                    .foregroundStyle(.white)
+                                    .padding(.horizontal, 8)
+                            }
+                    } else {
+                        Text(label)
+                            .font(.caption.weight(.bold).monospacedDigit())
+                            .foregroundStyle(.secondary)
+                            .padding(.leading, 8)
+                    }
+                }
+            }
+            .frame(height: 24)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Progress")
+            .accessibilityValue("\(label) of \(unitText(hours: targetHours ?? 0, revenue: targetRevenue ?? 0))")
+        } else {
+            loggedOnlyRow(hours: actualHours, revenue: actualRevenue)
+        }
+    }
+
     @ViewBuilder
     private func dayBullet(_ slice: ClientPeriodSlice) -> some View {
         if slice.isRestDay {
             dayOffRow(slice)
         } else if let targetHours = slice.targetHours, targetHours > 0 {
-            let fraction = min(max((slice.actualHours / targetHours).doubleValue, 0), 1)
             VStack(alignment: .leading, spacing: 4) {
-                GeometryReader { proxy in
-                    let fillWidth = fraction > 0 ? max(proxy.size.width * fraction, 46) : 0
-                    ZStack(alignment: .leading) {
-                        Capsule()
-                            .fill(Color.primary.opacity(0.08))
-                        if fraction > 0 {
-                            Capsule()
-                                .fill(clientColor)
-                                .frame(width: fillWidth)
-                                .overlay(alignment: .trailing) {
-                                    Text(unitText(hours: slice.actualHours, revenue: slice.actualRevenue))
-                                        .font(.caption.weight(.bold).monospacedDigit())
-                                        .foregroundStyle(.white)
-                                        .padding(.trailing, 8)
-                                }
-                        } else {
-                            Text(unitText(hours: slice.actualHours, revenue: slice.actualRevenue))
-                                .font(.caption.weight(.bold).monospacedDigit())
-                                .foregroundStyle(.secondary)
-                                .padding(.leading, 8)
-                        }
-                    }
-                }
-                .frame(height: 24)
+                progressCapsule(
+                    actualHours: slice.actualHours,
+                    actualRevenue: slice.actualRevenue,
+                    targetHours: targetHours,
+                    targetRevenue: slice.targetRevenue
+                )
 
                 dayMetrics(slice, targetHours: targetHours)
                     .padding(.top, 6)

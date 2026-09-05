@@ -2,17 +2,14 @@ import SwiftUI
 
 /// The popover's Overall summary row, pinned above the client cards for every
 /// period. It follows the h/$ toggle: revenue mode mirrors the menu-bar Overall
-/// exactly (same `AggregateProgress`), while hours mode shows summed hours. The
-/// ring encodes the same fraction shown after the trailing actual/target pair.
+/// exactly (same `AggregateProgress`), while hours mode shows summed hours.
 struct OverallRowView: View {
     var aggregate: AggregateProgress
     var unit: DisplayUnit
     var selectedPeriod: AggregationPeriod
     var onSelectPeriod: (AggregationPeriod) -> Void
-    /// The day card style, toggled here because the choice scopes to the day
-    /// period the row is already switching. Only rendered while day is active.
-    var dayStyle: DayViewStyle
-    var onSelectDayStyle: (DayViewStyle) -> Void
+    var cardStyle: ClientCardStyle
+    var onSelectCardStyle: (ClientCardStyle) -> Void
 
     private var periodSelection: Binding<AggregationPeriod> {
         Binding(
@@ -53,23 +50,13 @@ struct OverallRowView: View {
 
     var body: some View {
         HStack(spacing: 9) {
-            OverallRingGlyph(fraction: isAvailable ? fraction : nil)
-                .frame(width: 20, height: 20)
-
             HStack(spacing: 4) {
-                Text("Overall")
-                    .textCase(.uppercase)
-                    .fixedSize(horizontal: true, vertical: false)
-                    .accessibilityHidden(true)
-
                 OverallPeriodCycleButton(selection: periodSelection)
                     .fixedSize()
 
-                if selectedPeriod == .day {
-                    DayStyleToggle(selection: dayStyle, onSelect: onSelectDayStyle)
-                        .fixedSize()
-                        .padding(.leading, 2)
-                }
+                CardStyleToggle(selection: cardStyle, onSelect: onSelectCardStyle)
+                    .fixedSize()
+                    .padding(.leading, 2)
             }
             .foregroundStyle(.secondary)
             .font(.caption.weight(.semibold))
@@ -90,7 +77,7 @@ struct OverallRowView: View {
                 // re-dialled rather than swapped.
                 .contentTransition(.numericText())
                 .animation(Self.valueChange, value: summaryText)
-                .accessibilityLabel("\(percentText), \(actualText) of \(targetText)")
+                .accessibilityLabel("Overall: \(percentText), \(actualText) of \(targetText)")
         }
         .padding(.horizontal, 4)
     }
@@ -159,18 +146,18 @@ private struct OverallPeriodCycleButton: View {
     }
 }
 
-/// The capsule/timeline switch for the day cards: two icon segments built
+/// The capsule/timeline switch for client cards: two icon segments built
 /// from plain Buttons, matching the cycle button's inline language. Like it,
 /// deliberately not a native menu or `Picker(.menu)` (BON-48); a segmented
 /// `Picker` would also read too heavy at this row's caption scale.
-private struct DayStyleToggle: View {
-    var selection: DayViewStyle
-    var onSelect: (DayViewStyle) -> Void
+private struct CardStyleToggle: View {
+    var selection: ClientCardStyle
+    var onSelect: (ClientCardStyle) -> Void
 
     var body: some View {
         HStack(spacing: 2) {
-            segment(.timeline, icon: "chart.xyaxis.line", help: "Timeline: the day as a growing curve")
-            segment(.capsule, icon: "capsule", help: "Capsule: today against the day pace")
+            segment(.timeline, icon: "chart.xyaxis.line", help: "Timeline: actual progress against the plan")
+            segment(.capsule, icon: "capsule", help: "Capsule: progress toward the period goal")
         }
         .padding(2)
         .background(
@@ -178,10 +165,10 @@ private struct DayStyleToggle: View {
                 .fill(Color.primary.opacity(0.06))
         )
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("Day card style")
+        .accessibilityLabel("Client card style")
     }
 
-    private func segment(_ style: DayViewStyle, icon: String, help: LocalizedStringKey) -> some View {
+    private func segment(_ style: ClientCardStyle, icon: String, help: LocalizedStringKey) -> some View {
         Button {
             onSelect(style)
         } label: {
@@ -199,32 +186,5 @@ private struct DayStyleToggle: View {
         .help(help)
         .accessibilityLabel(style.label)
         .accessibilityAddTraits(selection == style ? [.isSelected] : [])
-    }
-}
-
-/// A compact progress ring for the Overall row, mirroring the menu-bar ring's
-/// look at popover scale. A nil fraction renders the track alone (no goal).
-private struct OverallRingGlyph: View {
-    var fraction: Double?
-
-    private var clampedFraction: Double {
-        guard let fraction, fraction.isFinite else { return 0 }
-        return min(max(fraction, 0), 1)
-    }
-
-    var body: some View {
-        ZStack {
-            Circle()
-                .stroke(Color.primary.opacity(0.16), lineWidth: 2.5)
-            // Always mounted, even at zero: inserting the arc on the first
-            // non-zero value would pop it in at full length instead of
-            // sweeping there from the track.
-            Circle()
-                .trim(from: 0, to: clampedFraction)
-                .stroke(Color.secondary, style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
-                .rotationEffect(.degrees(-90))
-                .animation(.easeOut(duration: 0.28), value: clampedFraction)
-        }
-        .accessibilityHidden(true)
     }
 }

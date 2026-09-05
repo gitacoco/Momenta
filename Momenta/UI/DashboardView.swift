@@ -262,9 +262,9 @@ struct DashboardView: View {
                                     appState.displaySettings.aggregationPeriod = selectedPeriod
                                 }
                             },
-                            dayStyle: appState.displaySettings.dayViewStyle,
-                            onSelectDayStyle: { style in
-                                appState.displaySettings.dayViewStyle = style
+                            cardStyle: appState.displaySettings.cardViewStyle,
+                            onSelectCardStyle: { style in
+                                appState.displaySettings.cardViewStyle = style
                             }
                         )
                         .padding(.top, Self.overallRowTopPadding)
@@ -288,7 +288,7 @@ struct DashboardView: View {
                             ClientCardView(
                                 data: card,
                                 unit: appState.displayUnit,
-                                dayStyle: appState.displaySettings.dayViewStyle,
+                                cardStyle: appState.displaySettings.cardViewStyle,
                                 // nil reference = following now (BON-21 semantics).
                                 isCurrentPeriod: appState.selectedReference == nil,
                                 // Whole days since 2001: stable within a day so

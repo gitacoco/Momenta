@@ -151,14 +151,16 @@ denominator, the target holds still all day — yesterday's shortfall raises it 
 yesterday's surplus lowers it, but logging against it never moves it. The day
 completes only when the work is actually done.
 
-Day client cards have two styles, selected beside the period control in the
-Overall row:
+Client cards in Day, Week, and Month have two styles, selected beside the
+period control in the summary row. Each period remembers its own selection:
 
-- **Capsule** compares today's accumulated work with the frozen daily goal.
-- **Timeline** plots cumulative actual work across 24 hours. Its plan is flat
-  before the client's work window, rises through that window, and stays flat
-  afterward. The ahead/behind result compares actual work with the plan at the
-  current time, so a morning before work starts does not read as debt.
+- **Capsule** compares accumulated work with the period's goal: the frozen
+  daily goal, the week's target, or the full monthly goal.
+- **Timeline** plots cumulative actual work against the plan. In Day, the
+  plan is flat before the client's work window, rises through that window,
+  and stays flat afterward. The Day ahead/behind result compares actual work
+  with the plan at the current time, so a morning before work starts does not
+  read as debt.
 
 On a scheduled day off, both styles show **Day off** without a plan or artificial
 debt. Work logged on that day still counts as actual progress.
