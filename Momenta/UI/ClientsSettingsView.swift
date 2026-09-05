@@ -323,6 +323,7 @@ private struct ClientDetailView: View {
     @State private var goalEditor: GoalEditorState
     @State private var showLogoImporter = false
     @State private var logoImportError: String?
+    @State private var showsDaysOff = false
     var focusedField: FocusState<ClientField?>.Binding
 
     init(
@@ -409,6 +410,10 @@ private struct ClientDetailView: View {
             }
 
             pacingSection
+
+            if !client.isArchivedInToggl {
+                GoalOutlookSection(client: liveClient, editor: goalEditor)
+            }
 
             GoalHistoryView(client: liveClient)
         }
@@ -610,6 +615,38 @@ private struct ClientDetailView: View {
             }
 
             workHoursRow
+
+            daysOffRow
+        }
+    }
+
+    private var daysOffRow: some View {
+        LabeledContent("Days off") {
+            HStack(spacing: 8) {
+                let count = (liveClient.daysOff ?? []).filter { $0.yearMonth == goalEditor.month }.count
+                Text(count == 0 ? "None this month" : "\(count) this month")
+                    .foregroundStyle(.secondary)
+                Button("Choose dates…") { showsDaysOff = true }
+                    .popover(isPresented: $showsDaysOff) {
+                        DaysOffPicker(
+                            daysOff: daysOffBinding,
+                            month: goalEditor.month,
+                            timeZone: appState.timeZone,
+                            today: appState.displayNow
+                        )
+                    }
+            }
+        }
+        .help("Days off pause planned progress for this client. Logged time still counts toward the monthly goal.")
+    }
+
+    private var daysOffBinding: Binding<Set<CalendarDay>> {
+        Binding {
+            liveClient.daysOff ?? []
+        } set: { dates in
+            guard var updated = appState.config.client(id: client.id) else { return }
+            updated.daysOff = dates
+            appState.config.update(updated)
         }
     }
 

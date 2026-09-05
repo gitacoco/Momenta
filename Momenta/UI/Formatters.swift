@@ -5,6 +5,18 @@ enum Format {
         value.doubleValue.formatted(.number.precision(.fractionLength(1))) + "h"
     }
 
+    static func hoursAndMinutes(_ value: Decimal) -> String {
+        guard value > 0 else { return "0h" }
+        let totalMinutes = (value.doubleValue * 60).rounded()
+        guard totalMinutes >= 1 else { return "<1m" }
+        let hours = (totalMinutes / 60).rounded(.down)
+        let minutes = totalMinutes.truncatingRemainder(dividingBy: 60)
+        let number = FloatingPointFormatStyle<Double>.number.precision(.fractionLength(0))
+        if hours == 0 { return "\(minutes.formatted(number))m" }
+        if minutes == 0 { return "\(hours.formatted(number))h" }
+        return "\(hours.formatted(number))h \(minutes.formatted(number))m"
+    }
+
     static func currency(_ value: Decimal, code: String = "USD") -> String {
         value.doubleValue.formatted(.currency(code: code).precision(.fractionLength(0)))
     }

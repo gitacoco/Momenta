@@ -66,6 +66,28 @@ struct RefreshLifecycleTests {
 
     // MARK: Throttling
 
+    @Test func goalOutlookLoadsMissingActualsWithoutNavigatingTheDashboard() async {
+        let provider = CountingProvider()
+        let appState = AppState(
+            provider: provider,
+            account: disconnectedAccount(),
+            config: ConfigStore(defaults: freshDefaults()),
+            snapshotCache: tempCache(),
+            defaults: freshDefaults(),
+            autoRefresh: false
+        )
+        let current = appState.currentMonth
+        appState.selectedMonth = current.previous
+        #expect(appState.snapshots[current] == nil)
+        await appState.loadGoalSnapshotIfNeeded(for: current)
+        #expect(appState.snapshots[current] != nil)
+        #expect(appState.selectedMonth == current.previous)
+        #expect(provider.snapshotLoads == 1)
+        await appState.loadGoalSnapshotIfNeeded(for: current)
+        await appState.loadGoalSnapshotIfNeeded(for: current.next)
+        #expect(provider.snapshotLoads == 1)
+    }
+
     @Test func onOpenModeReusesLastFetchWithinThrottleWindow() async {
         let provider = CountingProvider()
         let appState = AppState(

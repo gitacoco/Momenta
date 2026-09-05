@@ -34,6 +34,38 @@ struct ConfigStoreTests {
 
     // MARK: Merge
 
+    @Test func daysOffPersistPerClientAndSurviveTogglReconciliation() throws {
+        let defaults = freshDefaults()
+        let store = ConfigStore(defaults: defaults)
+        let fetched = [
+            TogglClientDTO(id: 7, wid: 101, name: "Acme", archived: false),
+            TogglClientDTO(id: 8, wid: 101, name: "Other", archived: false),
+        ]
+        store.merge(workspaces: workspaces, togglClients: fetched)
+        let dayOff = CalendarDay(year: 2026, month: 9, day: 7)
+        var config = try #require(store.client(id: 7))
+        config.daysOff = [dayOff]
+        store.update(config)
+        store.merge(workspaces: workspaces, togglClients: fetched)
+        let reloaded = ConfigStore(defaults: defaults)
+        #expect(reloaded.client(id: 7)?.daysOff == [dayOff])
+        #expect(reloaded.client(id: 8)?.daysOff == nil)
+
+        config.daysOff = []
+        store.update(config)
+        #expect(ConfigStore(defaults: defaults).client(id: 7)?.daysOff == [])
+    }
+
+    @Test func legacyClientConfigDecodesWithoutDaysOff() throws {
+        let encoded = try JSONEncoder().encode(existingClient())
+        var object = try #require(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        object.removeValue(forKey: "daysOff")
+        let data = try JSONSerialization.data(withJSONObject: object)
+        let decoded = try JSONDecoder().decode(ClientConfig.self, from: data)
+        #expect(decoded.id == 7)
+        #expect(decoded.daysOff == nil)
+    }
+
     @Test func mergeAddsNewClientsDisabled() {
         let store = ConfigStore(defaults: freshDefaults())
         store.merge(workspaces: workspaces, togglClients: [

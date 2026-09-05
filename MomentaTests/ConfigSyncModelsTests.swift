@@ -45,6 +45,42 @@ struct ConfigSyncModelsTests {
         )
     }
 
+    @Test func daysOffMergeIndependentAdditionsAndRemovalsAndProject() throws {
+        let first = CalendarDay(year: 2026, month: 9, day: 7)
+        let second = CalendarDay(year: 2026, month: 9, day: 8)
+        let third = CalendarDay(year: 2026, month: 9, day: 9)
+        var original = client(7)
+        original.daysOff = [first]
+        var local = original
+        local.daysOff = [second]
+        var server = original
+        server.daysOff = [first, third]
+        let merged = SyncedConfigPayload.merge(base: payload([original]), local: payload([local]), server: payload([server]))
+        let decoded = try JSONDecoder().decode(SyncedConfigPayload.self, from: JSONEncoder().encode(merged))
+        let result = try #require(decoded.clients[7])
+        #expect(result.daysOff == [second, third])
+        let config = ClientConfig(id: 7, workspaceID: 1, workspaceName: "Studio", togglName: "Acme", colorHex: "#111111", isEnabled: true, isArchivedInToggl: false, pacing: .weekdays, goalHistory: [:])
+        #expect(result.applying(to: config, localLogoFileName: nil).daysOff == [second, third])
+        #expect(SyncedClientConfig(client: result.applying(to: config, localLogoFileName: nil)).daysOff == [second, third])
+    }
+
+    @Test func firstSyncRetainsDaysOffFromBothDevices() {
+        let first = CalendarDay(year: 2026, month: 9, day: 7)
+        let second = CalendarDay(year: 2026, month: 10, day: 1)
+        var local = client(7)
+        local.daysOff = [first]
+        var server = client(7)
+        server.daysOff = [second]
+        let merged = SyncedConfigPayload.initialMerge(local: payload([local]), server: payload([server]))
+        #expect(merged.clients[7]?.daysOff == [first, second])
+    }
+
+    @Test func legacySyncPayloadDecodesWithoutDaysOff() throws {
+        let data = try JSONEncoder().encode(client(7))
+        let decoded = try JSONDecoder().decode(SyncedClientConfig.self, from: data)
+        #expect(decoded.daysOff == nil)
+    }
+
     @Test func threeWayMergePreservesIndependentFieldsAndGoalMonths() {
         let juneGoal = MonthlyGoal(hourlyRate: 100, input: .hours(40))
         let julyGoal = MonthlyGoal(hourlyRate: 120, input: .hours(50))

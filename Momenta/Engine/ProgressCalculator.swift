@@ -246,7 +246,7 @@ enum ProgressCalculator {
         let calendar = YearMonth.calendar(in: timeZone)
         let monthStart = month.start(in: timeZone)
         let dayCount = month.dayCount(in: timeZone)
-        let weights = dailyWeights(month: month, pacing: client.pacing, customWorkDays: client.customWorkDays, timeZone: timeZone)
+        let weights = dailyWeights(month: month, pacing: client.pacing, customWorkDays: client.customWorkDays, daysOff: client.daysOff, timeZone: timeZone)
         let totalWeight = weights.reduce(0, +)
 
         // Actual hours per day, attributed by entry start time.
@@ -302,6 +302,7 @@ enum ProgressCalculator {
                 month: month,
                 pacing: client.pacing,
                 customWorkDays: client.customWorkDays,
+                daysOff: client.daysOff,
                 timeZone: timeZone,
                 now: now
             )
@@ -366,7 +367,7 @@ enum ProgressCalculator {
         for client in clients where client.state(for: month) == .configured {
             guard let goal = client.goal(for: month),
                   (client.isBillable ? goal.isComplete : goal.hours > 0) else { continue }
-            let weights = dailyWeights(month: month, pacing: client.pacing, customWorkDays: client.customWorkDays, timeZone: timeZone)
+            let weights = dailyWeights(month: month, pacing: client.pacing, customWorkDays: client.customWorkDays, daysOff: client.daysOff, timeZone: timeZone)
             for index in weights.indices where weights[index] > 0 {
                 aggregateWeights[index] = 1
             }
@@ -412,8 +413,7 @@ enum ProgressCalculator {
                 // A day the client doesn't work has no target, so its By-Client
                 // ring reads neutral rather than behind — the same treatment the
                 // Overall ring already gives an unscheduled day below.
-                let workWeekdays = client.pacing.workWeekdays(custom: client.customWorkDays)
-                let scheduledToday = workWeekdays.contains(calendar.component(.weekday, from: interval.start))
+                let scheduledToday = client.plansProgress(on: interval.start, timeZone: timeZone)
                 if scheduledToday {
                     // Today's goal, frozen at the reference day's start: only
                     // work banked before the day moves it, so logging today
@@ -426,6 +426,7 @@ enum ProgressCalculator {
                         month: month,
                         pacing: client.pacing,
                         customWorkDays: client.customWorkDays,
+                        daysOff: client.daysOff,
                         timeZone: timeZone,
                         now: interval.start
                     )
@@ -441,10 +442,12 @@ enum ProgressCalculator {
                     hoursAvailable = false
                 }
             } else if totalWeight == 0 {
-                targetHours = 0
-                target = 0
-                targetIsAvailable = false
-                hoursAvailable = false
+                // Taking the entire month off removes planned increments,
+                // but never cancels the user's monthly commitment.
+                targetHours = goal.hours
+                target = goal.revenue
+                targetIsAvailable = true
+                hoursAvailable = true
             } else {
                 // Multiply before dividing so a divisible slice stays exact
                 // (e.g. 3680 × 5 / 23 == 800, not 799.99…). This keeps the
@@ -552,8 +555,7 @@ enum ProgressCalculator {
         // day, so logging nothing is not "behind". The catch-up pace is a
         // month-level idea; surfacing it as this day's goal is exactly the
         // artificial debt the pacing schedule exists to avoid.
-        let workWeekdays = progress.client.pacing.workWeekdays(custom: progress.client.customWorkDays)
-        let isScheduledDay = workWeekdays.contains(calendar.component(.weekday, from: refDayStart))
+        let isScheduledDay = progress.client.plansProgress(on: refDayStart, timeZone: timeZone)
         let isRestDay = progress.goal != nil && !isScheduledDay
 
         // Today's goal: the catch-up pace measured once, at the day's start,
@@ -570,6 +572,7 @@ enum ProgressCalculator {
                 month: progress.month,
                 pacing: progress.client.pacing,
                 customWorkDays: progress.client.customWorkDays,
+                daysOff: progress.client.daysOff,
                 timeZone: timeZone,
                 now: refDayStart
             )
@@ -727,6 +730,7 @@ enum ProgressCalculator {
                         month: dayMonth,
                         pacing: client.pacing,
                         customWorkDays: client.customWorkDays,
+                        daysOff: client.daysOff,
                         timeZone: timeZone
                     )
                     scheduledWeightsByMonth[dayMonth] = weights
@@ -888,34 +892,39 @@ enum ProgressCalculator {
         month: YearMonth,
         pacing: PacingMode,
         customWorkDays: Set<Int>? = nil,
+        daysOff: Set<CalendarDay>? = nil,
         timeZone: TimeZone
     ) -> [Int] {
         let calendar = YearMonth.calendar(in: timeZone)
         let monthStart = month.start(in: timeZone)
-        let workWeekdays = pacing.workWeekdays(custom: customWorkDays)
         return (0..<month.dayCount(in: timeZone)).map { dayIndex in
             guard let dayStart = calendar.date(byAdding: .day, value: dayIndex, to: monthStart) else { return 0 }
-            return workWeekdays.contains(calendar.component(.weekday, from: dayStart)) ? 1 : 0
+            return pacing.plansProgress(
+                on: dayStart, custom: customWorkDays, daysOff: daysOff, timeZone: timeZone
+            ) ? 1 : 0
         }
     }
 
-    /// Scheduled days remaining in the month strictly after today (today is
-    /// treated as available for catching up, so it is included).
+    /// Scheduled days remaining in the month. The live catch-up pace includes
+    /// today; the settings outlook explicitly excludes it.
     static func remainingScheduledDays(
         month: YearMonth,
         pacing: PacingMode,
         customWorkDays: Set<Int>? = nil,
+        daysOff: Set<CalendarDay>? = nil,
         timeZone: TimeZone,
-        after now: Date
+        after now: Date,
+        includingToday: Bool = true
     ) -> Int {
         let calendar = YearMonth.calendar(in: timeZone)
         let monthStart = month.start(in: timeZone)
-        let weights = dailyWeights(month: month, pacing: pacing, customWorkDays: customWorkDays, timeZone: timeZone)
+        let weights = dailyWeights(month: month, pacing: pacing, customWorkDays: customWorkDays, daysOff: daysOff, timeZone: timeZone)
+        let today = calendar.startOfDay(for: now)
         var remaining = 0
         for dayIndex in 0..<weights.count {
             guard let dayStart = calendar.date(byAdding: .day, value: dayIndex, to: monthStart) else { continue }
             guard let dayEnd = calendar.date(byAdding: .day, value: 1, to: dayStart) else { continue }
-            if dayEnd > now {
+            if includingToday ? dayEnd > now : dayStart > today {
                 remaining += weights[dayIndex]
             }
         }
@@ -931,6 +940,7 @@ enum ProgressCalculator {
         month: YearMonth,
         pacing: PacingMode,
         customWorkDays: Set<Int>? = nil,
+        daysOff: Set<CalendarDay>? = nil,
         timeZone: TimeZone,
         now: Date
     ) -> Decimal {
@@ -939,6 +949,7 @@ enum ProgressCalculator {
             month: month,
             pacing: pacing,
             customWorkDays: customWorkDays,
+            daysOff: daysOff,
             timeZone: timeZone,
             after: now
         )

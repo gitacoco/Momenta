@@ -188,6 +188,19 @@ groups them by workspace. For each client you can:
   values.
 - Pace the goal over weekdays, every calendar day, or a custom set of weekdays.
 - Set the daily work window used by the Day timeline (default: 9:00–18:00).
+- Choose **Days off → Choose dates…** to mark or clear individual dates for
+  this client. These dates pause planned progress in Day, Week, and Month;
+  logged work still counts, and the monthly goal stays unchanged.
+- See **Per planned day after today** below Pacing. It subtracts this month's
+  logged hours from the monthly total and divides the remainder among planned
+  dates strictly after today, excluding days off. It updates with goal and
+  schedule edits, assuming no additional work today. The information button
+  shows the calculation; a month with no remaining planned dates says so.
+
+Days off and current-month goal edits save immediately. Days off belong to
+the selected client and are stored as calendar dates, so changing time zones
+does not shift them. The daily outlook uses the latest loaded Toggl entries;
+missing time-entry data is never treated as zero completed hours.
 
 Clients archived in Toggl remain available for historical data, but their
 Momenta configuration becomes read-only.

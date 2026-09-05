@@ -23,6 +23,17 @@ enum PacingMode: String, Codable, CaseIterable, Sendable {
             return days.isEmpty ? [2, 3, 4, 5, 6] : days
         }
     }
+
+    func plansProgress(
+        on date: Date,
+        custom: Set<Int>?,
+        daysOff: Set<CalendarDay>?,
+        timeZone: TimeZone
+    ) -> Bool {
+        let weekday = YearMonth.calendar(in: timeZone).component(.weekday, from: date)
+        return workWeekdays(custom: custom).contains(weekday)
+            && !(daysOff ?? []).contains(CalendarDay(containing: date, timeZone: timeZone))
+    }
 }
 
 /// The hours of the day a client's work is planned in, as minutes from local
@@ -119,6 +130,9 @@ struct ClientConfig: Identifiable, Hashable, Codable, Sendable {
     /// `pacing == .custom`. Optional so configs persisted before this field
     /// decode cleanly.
     var customWorkDays: Set<Int>? = nil
+    /// Explicit dates excluded from planned progress for this client. Nil
+    /// keeps configurations written before date-specific time off compatible.
+    var daysOff: Set<CalendarDay>? = nil
     /// Backing store for `isBillable`. Optional (nil == billable) so configs
     /// persisted before this field decode cleanly — `ConfigStore` decodes
     /// `[ClientConfig]` directly and swallows decode errors, so a non-optional
@@ -211,6 +225,10 @@ struct ClientConfig: Identifiable, Hashable, Codable, Sendable {
     /// selection applied when active.
     var workWeekdays: Set<Int> {
         pacing.workWeekdays(custom: customWorkDays)
+    }
+
+    func plansProgress(on date: Date, timeZone: TimeZone) -> Bool {
+        pacing.plansProgress(on: date, custom: customWorkDays, daysOff: daysOff, timeZone: timeZone)
     }
 
     /// The work window in effect, with the shared default applied.

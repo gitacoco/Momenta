@@ -10,6 +10,7 @@ struct SyncedClientConfig: Codable, Equatable, Sendable {
     var isEnabled: Bool
     var pacing: PacingMode
     var customWorkDays: Set<Int>?
+    var daysOff: Set<CalendarDay>?
     var goalHistory: [YearMonth: MonthlyGoal]
     var currencyCode: String?
     /// Mirrors `ClientConfig.billableFlag` (nil == billable). Optional so
@@ -37,6 +38,7 @@ struct SyncedClientConfig: Codable, Equatable, Sendable {
         billableFlag: Bool? = nil,
         dormantHourlyRate: Decimal? = nil,
         workWindow: WorkWindow? = nil,
+        daysOff: Set<CalendarDay>? = nil,
         logoRevision: String?
     ) {
         self.clientID = clientID
@@ -50,6 +52,7 @@ struct SyncedClientConfig: Codable, Equatable, Sendable {
         self.billableFlag = billableFlag
         self.dormantHourlyRate = dormantHourlyRate
         self.workWindow = workWindow
+        self.daysOff = daysOff
         self.logoRevision = logoRevision
     }
 
@@ -65,6 +68,7 @@ struct SyncedClientConfig: Codable, Equatable, Sendable {
         billableFlag = client.billableFlag
         dormantHourlyRate = client.dormantHourlyRate
         workWindow = client.workWindow
+        daysOff = client.daysOff
         self.logoRevision = logoRevision
     }
 
@@ -80,6 +84,7 @@ struct SyncedClientConfig: Codable, Equatable, Sendable {
         projected.billableFlag = billableFlag
         projected.dormantHourlyRate = dormantHourlyRate
         projected.workWindow = workWindow
+        projected.daysOff = daysOff
         projected.logoFileName = localLogoFileName
         return projected
     }
@@ -111,6 +116,7 @@ struct SyncedClientConfig: Codable, Equatable, Sendable {
             || billableFlag != nil
             || dormantHourlyRate != nil
             || workWindow != nil
+            || !(daysOff ?? []).isEmpty
             || logoRevision != nil
     }
 }
@@ -243,6 +249,10 @@ struct SyncedConfigPayload: Codable, Equatable, Sendable {
                 if chosen.workWindow == nil {
                     chosen.workWindow = local.workWindow
                 }
+                // Without a common base, retain dates selected on either Mac.
+                if local.daysOff != nil || server.daysOff != nil {
+                    chosen.daysOff = (local.daysOff ?? []).union(server.daysOff ?? [])
+                }
                 chosen.normalizeBillingRates()
                 mergedClients[id] = chosen
             case (let local?, nil):
@@ -315,6 +325,7 @@ struct SyncedConfigPayload: Codable, Equatable, Sendable {
                 local: local.workWindow,
                 server: server.workWindow
             ),
+            daysOff: mergeDaysOff(base: base?.daysOff, local: local.daysOff, server: server.daysOff),
             logoRevision: mergeField(
                 base: base?.logoRevision,
                 local: local.logoRevision,
@@ -325,6 +336,22 @@ struct SyncedConfigPayload: Codable, Equatable, Sendable {
         // goal months can come from different sides.
         merged.normalizeBillingRates()
         return merged
+    }
+
+    /// Merge date membership independently, preserving additions on one Mac
+    /// and removals on another instead of replacing the entire calendar.
+    private static func mergeDaysOff(
+        base: Set<CalendarDay>?,
+        local: Set<CalendarDay>?,
+        server: Set<CalendarDay>?
+    ) -> Set<CalendarDay>? {
+        guard base != nil || local != nil || server != nil else { return nil }
+        let base = base ?? []
+        let local = local ?? []
+        let server = server ?? []
+        return Set(base.union(local).union(server).filter { day in
+            mergeField(base: base.contains(day), local: local.contains(day), server: server.contains(day)) == true
+        })
     }
 
     private static func mergeDictionary<Key: Hashable & Sendable, Value: Equatable & Sendable>(
@@ -376,13 +403,13 @@ struct SyncedConfigPayload: Codable, Equatable, Sendable {
 /// current Toggl/UI projection is incomplete; `base` is strictly device-local.
 struct ConfigSyncLocalState: Codable, Equatable, Sendable {
     /// Version 2 introduced `billableFlag` and `dormantHourlyRate`; version 3
-    /// introduced `workWindow`. The bump is what protects each field: an older
+    /// introduced `workWindow`; version 4 introduced `daysOff`. An older
     /// device would decode the payload fine (unknown keys are ignored), then
     /// re-upload without the field, and a three-way merge on the newer device
     /// would read that as an explicit revert. Failing closed on the older
     /// device instead routes it through the existing unsupported-schema stop
     /// until it updates.
-    static let supportedSchemaVersion = 3
+    static let supportedSchemaVersion = 4
 
     var shadow: SyncedConfigPayload
     var base: SyncedConfigPayload?

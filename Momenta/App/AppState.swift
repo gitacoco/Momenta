@@ -500,6 +500,14 @@ final class AppState {
         await loadMonth(selectedMonth)
     }
 
+    /// Settings need logged hours without changing the dashboard's selected
+    /// period. Opening the editor is explicit intent to load a missing month.
+    func loadGoalSnapshotIfNeeded(for month: YearMonth) async {
+        guard month <= currentMonth, snapshots[month] == nil,
+              !loadingMonths.contains(month) else { return }
+        await loadMonth(month)
+    }
+
     private func loadMonth(_ month: YearMonth) async {
         guard let provider = activeProvider() else { return }
         let context = currentFetchContext()
