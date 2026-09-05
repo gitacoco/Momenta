@@ -39,19 +39,17 @@ struct PeriodProgressCapsule: View {
                     .fill(color)
                     .frame(width: fillWidth)
                 valueLabel
-                    .foregroundStyle(.white)
+                    .foregroundStyle(hasProgress ? Color.white : Color.secondary)
                     .frame(width: labelWidth, alignment: .trailing)
                     .offset(x: max(fillWidth - labelWidth, 0))
-                    .opacity(hasProgress ? 1 : 0)
-                valueLabel
-                    .foregroundStyle(.secondary)
-                    .opacity(hasProgress ? 0 : 1)
             }
-            // Match the chart's period transition without animating the
-            // card's layout, goal button, or semantic foreground styles.
+            // Match the chart's period duration within the geometry boundary.
             .animation(reduceMotion ? nil : .easeInOut(duration: 0.48), value: period)
         }
         .frame(height: 24)
+        // Resolve card reordering and height changes outside the capsule's
+        // animation, so only its local fill and label geometry interpolate.
+        .geometryGroup()
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Progress")
         .accessibilityValue("\(actualText) of \(targetText)")
@@ -62,6 +60,8 @@ struct PeriodProgressCapsule: View {
             .font(.caption.weight(.bold).monospacedDigit())
             .fixedSize()
             .padding(.horizontal, 8)
-            .contentTransition(.numericText())
+            // The label travels with the fill. Rolling individual digits at
+            // the same time scatters old and new glyphs along that movement.
+            .contentTransition(.identity)
     }
 }
