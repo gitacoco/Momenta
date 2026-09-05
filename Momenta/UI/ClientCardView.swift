@@ -662,7 +662,7 @@ struct ClientCardView: View {
                 // Chart cards rely on the stack spacing alone: the plot's own
                 // top gutter already sets the header off from the first
                 // gridline, so extra padding here reads as a gap twice over.
-                .padding(.bottom, bodyIsChart ? 0 : 4)
+                .padding(.bottom, bodyIsChart || isDayOff ? 0 : 4)
             if let chartModel {
                 GeometryReader { proxy in
                     AnimatedPeriodChartHost(target: chartModel, size: proxy.size) { rendered, plotHeight in
@@ -698,6 +698,11 @@ struct ClientCardView: View {
         }
     }
 
+    private var isDayOff: Bool {
+        if case .day(let slice) = data { return slice.isRestDay }
+        return false
+    }
+
     private var capsuleValues: (actualHours: Decimal, actualRevenue: Decimal,
                                 targetHours: Decimal?, targetRevenue: Decimal?) {
         switch data {
@@ -711,7 +716,7 @@ struct ClientCardView: View {
     @ViewBuilder
     private var capsuleContent: some View {
         if case .day(let slice) = data, slice.isRestDay {
-            dayOffRow(slice)
+            dayOffLoggedTime(slice)
         } else {
             // Keep one structural identity across periods so the fill can
             // interpolate from its current width instead of being recreated.
@@ -767,7 +772,15 @@ struct ClientCardView: View {
                     .foregroundStyle(.secondary)
             }
             Spacer()
-            goalChip
+            if isDayOff {
+                Text("Day off")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 8)
+                    .fixedSize()
+            } else {
+                goalChip
+            }
         }
     }
 
@@ -1119,7 +1132,7 @@ struct ClientCardView: View {
     @ViewBuilder
     private func dayTimelineMetrics(_ slice: ClientPeriodSlice) -> some View {
         if slice.isRestDay {
-            dayOffRow(slice)
+            dayOffLoggedTime(slice)
         } else if let targetHours = slice.targetHours, targetHours > 0 {
             let done = slice.actualHours >= targetHours
             let fraction = (slice.actualHours / targetHours).doubleValue
@@ -1155,18 +1168,14 @@ struct ClientCardView: View {
 
     // MARK: Bullet — day
 
-    /// A scheduled day off: flat plan, so no bullet and no behind/ahead
-    /// badge. Any hours logged anyway are shown as a bonus, not debt.
-    private func dayOffRow(_ slice: ClientPeriodSlice) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 6) {
-            Text("Day off")
-                .font(.title3.weight(.semibold))
-            if slice.actualHours > 0 {
-                Text("· \(unitText(hours: slice.actualHours, revenue: slice.actualRevenue)) logged")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-            }
-            Spacer()
+    /// The header carries the day-off status. Only work actually logged on
+    /// that day needs a second row; an empty rest day stays compact.
+    @ViewBuilder
+    private func dayOffLoggedTime(_ slice: ClientPeriodSlice) -> some View {
+        if slice.actualHours > 0 {
+            Text("\(unitText(hours: slice.actualHours, revenue: slice.actualRevenue)) logged")
+                .font(.callout.monospacedDigit())
+                .foregroundStyle(.secondary)
         }
     }
 

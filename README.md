@@ -163,8 +163,9 @@ switching periods and is remembered after relaunch:
   with the plan at the current time, so a morning before work starts does not
   read as debt.
 
-On a scheduled day off, both styles show **Day off** without a plan or artificial
-debt. Work logged on that day still counts as actual progress.
+On a scheduled day off, both styles replace the goal with **Day off** in a
+compact header. A second row appears only when work was logged on that day;
+that work still counts as actual progress without a plan or artificial debt.
 
 **Week** and **Month** compare actual progress with the planned share of the
 monthly goal for the selected calendar interval. Both lead with
