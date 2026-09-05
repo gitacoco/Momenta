@@ -174,7 +174,6 @@ struct DashboardView: View {
         // Overall; every row below reads from this shared snapshot.
         let period = appState.displaySettings.aggregationPeriod
         let clients = data.orderedClients(appState.visibleClientsForUnit, period: period)
-        let clientOrder = clients.map(\.id)
         return ScrollView {
                 VStack(spacing: Self.cardSpacing) {
                     // The Overall summary sits above the client cards for every
@@ -236,7 +235,6 @@ struct DashboardView: View {
                                 noDataCard(client)
                             }
                         }
-                        .modifier(ClientCardPlacement(order: clientOrder))
                     }
                 }
                 .padding(Self.contentInset)
