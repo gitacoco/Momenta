@@ -245,6 +245,8 @@ struct DashboardView: View {
         // One pass computed the month accrual, the period slices, and the
         // Overall; every row below reads from this shared snapshot.
         let period = appState.displaySettings.aggregationPeriod
+        let clients = data.orderedClients(appState.visibleClientsForUnit, period: period)
+        let clientOrder = clients.map(\.id)
         return ScrollView {
                 VStack(spacing: Self.cardSpacing) {
                     // The Overall summary sits above the client cards for every
@@ -283,30 +285,33 @@ struct DashboardView: View {
                     // Every enabled client gets a row — data (including
                     // rate-backfilled historical months), a setup prompt, or
                     // an explicit reason why there's nothing to show.
-                    ForEach(data.orderedClients(appState.visibleClientsForUnit, period: period)) { client in
-                        if let card = cardData(client, period: period, monthProgress: data.progressByClientID, slices: data.sliceByClientID) {
-                            ClientCardView(
-                                data: card,
-                                unit: appState.displayUnit,
-                                cardStyle: appState.displaySettings.cardViewStyle,
-                                // nil reference = following now (BON-21 semantics).
-                                isCurrentPeriod: appState.selectedReference == nil,
-                                // Whole days since 2001: stable within a day so
-                                // the day card's rotating copy holds all day.
-                                dailySeed: Int(appState.activeReference.timeIntervalSinceReferenceDate / 86_400),
-                                onEditGoal: {
-                                    appState.pendingSettingsDestination = .clients(clientID: client.id)
-                                    openSettingsWindow()
-                                }
-                            )
-                            .measuredAsClientCard()
-                        } else if client.state(for: appState.selectedMonth) == .needsSetup {
-                            setupCard(client)
+                    ForEach(clients) { client in
+                        Group {
+                            if let card = cardData(client, period: period, monthProgress: data.progressByClientID, slices: data.sliceByClientID) {
+                                ClientCardView(
+                                    data: card,
+                                    unit: appState.displayUnit,
+                                    cardStyle: appState.displaySettings.cardViewStyle,
+                                    // nil reference = following now (BON-21 semantics).
+                                    isCurrentPeriod: appState.selectedReference == nil,
+                                    // Whole days since 2001: stable within a day so
+                                    // the day card's rotating copy holds all day.
+                                    dailySeed: Int(appState.activeReference.timeIntervalSinceReferenceDate / 86_400),
+                                    onEditGoal: {
+                                        appState.pendingSettingsDestination = .clients(clientID: client.id)
+                                        openSettingsWindow()
+                                    }
+                                )
                                 .measuredAsClientCard()
-                        } else if client.state(for: appState.selectedMonth) == .configured {
-                            noDataCard(client)
-                                .measuredAsClientCard()
+                            } else if client.state(for: appState.selectedMonth) == .needsSetup {
+                                setupCard(client)
+                                    .measuredAsClientCard()
+                            } else if client.state(for: appState.selectedMonth) == .configured {
+                                noDataCard(client)
+                                    .measuredAsClientCard()
+                            }
                         }
+                        .modifier(ClientCardPlacement(order: clientOrder))
                     }
                 }
                 .padding(Self.contentInset)
