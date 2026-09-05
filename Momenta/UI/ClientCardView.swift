@@ -146,7 +146,7 @@ private enum PeriodChartAxis {
     }
 }
 
-/// Owns the only animated state in the card: the rendered chart model plus the
+/// Owns the chart's animated state: the rendered chart model plus the
 /// hand-drawn axis ticks. A Week <-> Month switch animates both inside one
 /// transaction as a zoom: marks are anchored to their calendar days, so the
 /// x-domain change stretches the shared window across the plot while values
@@ -680,28 +680,7 @@ struct ClientCardView: View {
                     dayTimelineMetrics(slice)
                 }
             } else {
-                switch data {
-                case .month(let progress):
-                    progressCapsule(
-                        actualHours: progress.actualHours,
-                        actualRevenue: progress.actualRevenue,
-                        targetHours: progress.goal?.hours,
-                        targetRevenue: progress.goal?.revenue
-                    )
-                    monthMetrics(progress)
-                        .padding(.top, 2)
-                case .week(let slice):
-                    progressCapsule(
-                        actualHours: slice.actualHours,
-                        actualRevenue: slice.actualRevenue,
-                        targetHours: slice.targetHours,
-                        targetRevenue: slice.targetRevenue
-                    )
-                    weekMetrics(slice)
-                        .padding(.top, 2)
-                case .day(let slice):
-                    dayBullet(slice)
-                }
+                capsuleContent
             }
         }
         .padding(12)
@@ -709,6 +688,52 @@ struct ClientCardView: View {
             RoundedRectangle(cornerRadius: 10)
                 .fill(Color(nsColor: .controlBackgroundColor))
         )
+    }
+
+    private var period: AggregationPeriod {
+        switch data {
+        case .month: .month
+        case .week: .week
+        case .day: .day
+        }
+    }
+
+    private var capsuleValues: (actualHours: Decimal, actualRevenue: Decimal,
+                                targetHours: Decimal?, targetRevenue: Decimal?) {
+        switch data {
+        case .month(let progress):
+            (progress.actualHours, progress.actualRevenue, progress.goal?.hours, progress.goal?.revenue)
+        case .week(let slice), .day(let slice):
+            (slice.actualHours, slice.actualRevenue, slice.targetHours, slice.targetRevenue)
+        }
+    }
+
+    @ViewBuilder
+    private var capsuleContent: some View {
+        if case .day(let slice) = data, slice.isRestDay {
+            dayOffRow(slice)
+        } else {
+            // Keep one structural identity across periods so the fill can
+            // interpolate from its current width instead of being recreated.
+            let values = capsuleValues
+            progressCapsule(
+                actualHours: values.actualHours,
+                actualRevenue: values.actualRevenue,
+                targetHours: values.targetHours,
+                targetRevenue: values.targetRevenue
+            )
+            Group {
+                switch data {
+                case .month(let progress): monthMetrics(progress)
+                case .week(let slice): weekMetrics(slice)
+                case .day(let slice):
+                    if let target = slice.targetHours, target > 0 {
+                        dayMetrics(slice, targetHours: target)
+                    }
+                }
+            }
+            .padding(.top, 2)
+        }
     }
 
     private var bodyIsChart: Bool {
@@ -1173,63 +1198,15 @@ struct ClientCardView: View {
         let actual = unit == .hours ? actualHours : actualRevenue
         let target = unit == .hours ? targetHours : targetRevenue
         if let target, target > 0 {
-            let fraction = min(max((actual / target).doubleValue, 0), 1)
-            let label = unitText(hours: actualHours, revenue: actualRevenue)
-            let font = NSFont.monospacedDigitSystemFont(
-                ofSize: NSFont.preferredFont(forTextStyle: .caption1).pointSize,
-                weight: .bold
+            PeriodProgressCapsule(
+                fraction: (actual / target).doubleValue,
+                actualText: unitText(hours: actualHours, revenue: actualRevenue),
+                targetText: unitText(hours: targetHours ?? 0, revenue: targetRevenue ?? 0),
+                color: clientColor,
+                period: period
             )
-            let labelWidth = ceil((label as NSString).size(withAttributes: [.font: font]).width) + 16
-            GeometryReader { proxy in
-                let fillWidth = min(proxy.size.width, max(proxy.size.width * fraction, labelWidth))
-                ZStack(alignment: .leading) {
-                    Capsule()
-                        .fill(Color.primary.opacity(0.08))
-                    if fraction > 0 {
-                        Capsule()
-                            .fill(clientColor)
-                            .frame(width: fillWidth)
-                            .overlay(alignment: .trailing) {
-                                Text(label)
-                                    .font(.caption.weight(.bold).monospacedDigit())
-                                    .foregroundStyle(.white)
-                                    .padding(.horizontal, 8)
-                            }
-                    } else {
-                        Text(label)
-                            .font(.caption.weight(.bold).monospacedDigit())
-                            .foregroundStyle(.secondary)
-                            .padding(.leading, 8)
-                    }
-                }
-            }
-            .frame(height: 24)
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel("Progress")
-            .accessibilityValue("\(label) of \(unitText(hours: targetHours ?? 0, revenue: targetRevenue ?? 0))")
         } else {
             loggedOnlyRow(hours: actualHours, revenue: actualRevenue)
-        }
-    }
-
-    @ViewBuilder
-    private func dayBullet(_ slice: ClientPeriodSlice) -> some View {
-        if slice.isRestDay {
-            dayOffRow(slice)
-        } else if let targetHours = slice.targetHours, targetHours > 0 {
-            VStack(alignment: .leading, spacing: 4) {
-                progressCapsule(
-                    actualHours: slice.actualHours,
-                    actualRevenue: slice.actualRevenue,
-                    targetHours: targetHours,
-                    targetRevenue: slice.targetRevenue
-                )
-
-                dayMetrics(slice, targetHours: targetHours)
-                    .padding(.top, 6)
-            }
-        } else {
-            loggedOnlyRow(slice)
         }
     }
 
