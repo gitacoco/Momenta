@@ -119,69 +119,84 @@ struct DisplaySettingsTests {
         #expect(settings.refreshMode == .manual)
     }
 
-    @Test func dayViewStyleRoundTripsAndDefaultsToCapsule() throws {
-        var settings = DisplaySettings()
-        settings.dayViewStyle = .timeline
+    @Test func selectedCardStyleSurvivesEveryPeriodSwitchAndRoundTrip() throws {
+        for style in ClientCardStyle.allCases {
+            for startingPeriod in AggregationPeriod.allCases {
+                var settings = DisplaySettings()
+                settings.aggregationPeriod = startingPeriod
+                settings.cardViewStyle = style
 
-        let data = try JSONEncoder().encode(settings)
-        let decoded = try JSONDecoder().decode(DisplaySettings.self, from: data)
-        #expect(decoded.dayViewStyle == .timeline)
-
-        // Settings persisted before the field existed keep working and land
-        // on the capsule (the pre-timeline behavior).
-        let legacy = try JSONDecoder().decode(
-            DisplaySettings.self,
-            from: Data(#"{"aggregationPeriod": "day"}"#.utf8)
-        )
-        #expect(legacy.dayViewStyle == .capsule)
-        #expect(legacy.aggregationPeriod == .day)
-    }
-
-    @Test func periodCardStylesPersistIndependently() throws {
-        for period in AggregationPeriod.allCases {
-            var settings = DisplaySettings()
-            settings.aggregationPeriod = period
-            settings.cardViewStyle = settings.cardViewStyle == .capsule ? .timeline : .capsule
-
-            let decoded = try JSONDecoder().decode(
-                DisplaySettings.self,
-                from: JSONEncoder().encode(settings)
-            )
-            #expect(decoded == settings)
-            #expect(decoded.dayViewStyle == (period == .day ? .timeline : .capsule))
-            #expect(decoded.weekViewStyle == (period == .week ? .capsule : .timeline))
-            #expect(decoded.monthViewStyle == (period == .month ? .capsule : .timeline))
-
-            var switched = decoded
-            for selectedPeriod in AggregationPeriod.allCases {
-                switched.aggregationPeriod = selectedPeriod
-                switch selectedPeriod {
-                case .day: #expect(switched.cardViewStyle == decoded.dayViewStyle)
-                case .week: #expect(switched.cardViewStyle == decoded.weekViewStyle)
-                case .month: #expect(switched.cardViewStyle == decoded.monthViewStyle)
+                for selectedPeriod in AggregationPeriod.allCases {
+                    settings.aggregationPeriod = selectedPeriod
+                    #expect(settings.cardViewStyle == style)
+                    let decoded = try JSONDecoder().decode(
+                        DisplaySettings.self,
+                        from: JSONEncoder().encode(settings)
+                    )
+                    #expect(decoded.cardViewStyle == style)
+                    #expect(decoded.aggregationPeriod == selectedPeriod)
                 }
             }
         }
     }
 
-    @Test func legacyCardStylesPreserveTheDaySelectionAndExistingCharts() throws {
-        let settings = try JSONDecoder().decode(
-            DisplaySettings.self,
-            from: Data(#"{"dayViewStyle":"timeline","aggregationPeriod":"week"}"#.utf8)
-        )
-        #expect(settings.dayViewStyle == .timeline)
-        #expect(settings.weekViewStyle == .timeline)
-        #expect(settings.monthViewStyle == .timeline)
+    @Test func legacyCardStyleMigratesFromTheActivePeriod() throws {
+        for period in AggregationPeriod.allCases {
+            for style in ClientCardStyle.allCases {
+                let otherStyle: ClientCardStyle = style == .capsule ? .timeline : .capsule
+                var object = [
+                    "aggregationPeriod": period.rawValue,
+                    "dayViewStyle": otherStyle.rawValue,
+                    "weekViewStyle": otherStyle.rawValue,
+                    "monthViewStyle": otherStyle.rawValue,
+                ]
+                object["\(period.rawValue)ViewStyle"] = style.rawValue
+                var settings = try JSONDecoder().decode(
+                    DisplaySettings.self,
+                    from: JSONSerialization.data(withJSONObject: object)
+                )
+                for selectedPeriod in AggregationPeriod.allCases {
+                    settings.aggregationPeriod = selectedPeriod
+                    #expect(settings.cardViewStyle == style)
+                }
+            }
+        }
     }
 
-    @Test func invalidCardStyleDoesNotResetOtherPeriods() throws {
+    @Test func legacyMissingStyleKeepsThePreviouslyDisplayedDefault() throws {
+        for period in AggregationPeriod.allCases {
+            let settings = try JSONDecoder().decode(
+                DisplaySettings.self,
+                from: JSONSerialization.data(withJSONObject: ["aggregationPeriod": period.rawValue])
+            )
+            #expect(settings.cardViewStyle == (period == .day ? .capsule : .timeline))
+        }
+    }
+
+    @Test func sharedCardStyleWinsOverLegacyPreferences() throws {
         let settings = try JSONDecoder().decode(
             DisplaySettings.self,
-            from: Data(#"{"dayViewStyle":"timeline","weekViewStyle":"unknown","monthViewStyle":"capsule"}"#.utf8)
+            from: Data(#"{"aggregationPeriod":"month","cardViewStyle":"capsule","monthViewStyle":"timeline"}"#.utf8)
         )
-        #expect(settings.dayViewStyle == .timeline)
-        #expect(settings.weekViewStyle == .timeline)
-        #expect(settings.monthViewStyle == .capsule)
+        #expect(settings.cardViewStyle == .capsule)
+
+        let object = try #require(
+            JSONSerialization.jsonObject(with: JSONEncoder().encode(settings)) as? [String: Any]
+        )
+        #expect(object["cardViewStyle"] as? String == "capsule")
+        #expect(object["dayViewStyle"] == nil)
+        #expect(object["weekViewStyle"] == nil)
+        #expect(object["monthViewStyle"] == nil)
+    }
+
+    @Test func invalidSharedCardStyleFallsBackWithoutResettingOtherSettings() throws {
+        let settings = try JSONDecoder().decode(
+            DisplaySettings.self,
+            from: Data(#"{"aggregationPeriod":"week","cardViewStyle":"unknown","weekViewStyle":"capsule","refreshMode":"manual"}"#.utf8)
+        )
+        #expect(settings.cardViewStyle == .capsule)
+        #expect(settings.aggregationPeriod == .week)
+        #expect(settings.refreshMode == .manual)
     }
 
     @Test func refreshModeAndIntervalRoundTrip() throws {

@@ -152,7 +152,8 @@ yesterday's surplus lowers it, but logging against it never moves it. The day
 completes only when the work is actually done.
 
 Client cards in Day, Week, and Month have two styles, selected beside the
-period control in the summary row. Each period remembers its own selection:
+period control in the summary row. The selected style stays the same when
+switching periods and is remembered after relaunch:
 
 - **Capsule** compares accumulated work with the period's goal: the frozen
   daily goal, the week's target, or the full monthly goal.

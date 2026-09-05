@@ -114,10 +114,8 @@ enum DisplayUnit: String, CaseIterable, Identifiable, Sendable {
 
 struct DisplaySettings: Hashable, Codable, Sendable {
     var aggregationPeriod: AggregationPeriod = .month
-    /// Each period remembers its own style; existing defaults are preserved.
-    var dayViewStyle: ClientCardStyle = .capsule
-    var weekViewStyle: ClientCardStyle = .timeline
-    var monthViewStyle: ClientCardStyle = .timeline
+    /// One presentation choice shared by all periods.
+    var cardViewStyle: ClientCardStyle = .timeline
     var menuBarObjectMode: MenuBarObjectMode = .aggregation
     var menuBarVisualization: MenuBarVisualization = .ring
     var showsOverallPercentage: Bool = false
@@ -144,25 +142,10 @@ struct DisplaySettings: Hashable, Codable, Sendable {
 
     init() {}
 
-    var cardViewStyle: ClientCardStyle {
-        get {
-            switch aggregationPeriod {
-            case .day: dayViewStyle
-            case .week: weekViewStyle
-            case .month: monthViewStyle
-            }
-        }
-        set {
-            switch aggregationPeriod {
-            case .day: dayViewStyle = newValue
-            case .week: weekViewStyle = newValue
-            case .month: monthViewStyle = newValue
-            }
-        }
-    }
-
     private enum CodingKeys: String, CodingKey {
         case aggregationPeriod
+        case cardViewStyle
+        // Read-only compatibility with per-period styles.
         case dayViewStyle
         case weekViewStyle
         case monthViewStyle
@@ -184,12 +167,17 @@ struct DisplaySettings: Hashable, Codable, Sendable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         aggregationPeriod =
             (try? container.decode(AggregationPeriod.self, forKey: .aggregationPeriod)) ?? .month
-        dayViewStyle =
-            (try? container.decode(ClientCardStyle.self, forKey: .dayViewStyle)) ?? .capsule
-        weekViewStyle =
-            (try? container.decode(ClientCardStyle.self, forKey: .weekViewStyle)) ?? .timeline
-        monthViewStyle =
-            (try? container.decode(ClientCardStyle.self, forKey: .monthViewStyle)) ?? .timeline
+        // Keep the currently displayed style when upgrading from independent
+        // period preferences, then carry that one choice across every period.
+        let legacyStyleKey: CodingKeys = switch aggregationPeriod {
+        case .day: .dayViewStyle
+        case .week: .weekViewStyle
+        case .month: .monthViewStyle
+        }
+        cardViewStyle =
+            (try? container.decode(ClientCardStyle.self, forKey: .cardViewStyle))
+            ?? (try? container.decode(ClientCardStyle.self, forKey: legacyStyleKey))
+            ?? (aggregationPeriod == .day ? .capsule : .timeline)
 
         let legacySplit =
             (try? container.decode(Bool.self, forKey: .perClientSplit)) ?? false
@@ -222,9 +210,7 @@ struct DisplaySettings: Hashable, Codable, Sendable {
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(aggregationPeriod, forKey: .aggregationPeriod)
-        try container.encode(dayViewStyle, forKey: .dayViewStyle)
-        try container.encode(weekViewStyle, forKey: .weekViewStyle)
-        try container.encode(monthViewStyle, forKey: .monthViewStyle)
+        try container.encode(cardViewStyle, forKey: .cardViewStyle)
         try container.encode(menuBarObjectMode, forKey: .menuBarObjectMode)
         try container.encode(menuBarVisualization, forKey: .menuBarVisualization)
         try container.encode(showsOverallPercentage, forKey: .showsOverallPercentage)

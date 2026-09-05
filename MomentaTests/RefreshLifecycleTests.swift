@@ -276,6 +276,12 @@ struct RefreshLifecycleTests {
             autoRefresh: false
         )
         appState.displaySettings.aggregationPeriod = .week
+        appState.displaySettings.cardViewStyle = .capsule
+        appState.displaySettings.aggregationPeriod = .month
+        #expect(appState.displaySettings.cardViewStyle == .capsule)
+        appState.displaySettings.aggregationPeriod = .day
+        #expect(appState.displaySettings.cardViewStyle == .capsule)
+        appState.displaySettings.aggregationPeriod = .week
         appState.displaySettings.menuBarObjectMode = .both
         appState.displaySettings.menuBarVisualization = .waterline
         appState.displaySettings.showsOverallPercentage = true
@@ -289,6 +295,7 @@ struct RefreshLifecycleTests {
             autoRefresh: false
         )
         #expect(relaunched.displaySettings.aggregationPeriod == .week)
+        #expect(relaunched.displaySettings.cardViewStyle == .capsule)
         #expect(relaunched.displaySettings.menuBarObjectMode == .both)
         #expect(relaunched.displaySettings.menuBarVisualization == .waterline)
         #expect(relaunched.displaySettings.showsOverallPercentage)
