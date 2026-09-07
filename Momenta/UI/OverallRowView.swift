@@ -134,12 +134,15 @@ private struct OverallPeriodCycleButton: View {
             .background(
                 RoundedRectangle(cornerRadius: 5, style: .continuous)
                     .fill(Color.primary.opacity(isHovering ? 0.08 : 0))
+                    // Animating semantic text colors over popover material
+                    // produces a low-contrast tint during the transition.
+                    // Keep the animation on the background alone.
+                    .animation(.easeOut(duration: 0.12), value: isHovering)
             )
             .contentShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
         }
         .buttonStyle(.plain)
         .onHover { isHovering = $0 }
-        .animation(.easeOut(duration: 0.12), value: isHovering)
         .accessibilityLabel("Overall period")
         .accessibilityValue(selection.overallPickerLabel)
         .accessibilityHint("Cycles the summary period")
