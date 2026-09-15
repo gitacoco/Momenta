@@ -75,6 +75,28 @@ struct GoalOutlookTests {
         #expect(result.plannedDays == 17) // Today is now Monday, not the snapshot's Friday.
     }
 
+    @Test(arguments: [0, 9], [false, true])
+    func newerSnapshotIncludesTodaysWorkDespiteEarlierDisplayClock(clockHour: Int, isRunning: Bool) throws {
+        var snapshot = snapshot()
+        if isRunning { snapshot.entries[1].stop = nil }
+        let result = GoalOutlook(
+            goalHours: 80, client: client(), snapshot: snapshot,
+            timeZone: utc, now: date(4, hour: clockHour)
+        )
+        let progress = try #require(ProgressCalculator.progress(
+            for: client(), entries: snapshot.entries, month: september,
+            timeZone: utc, now: snapshot.fetchedAt
+        ))
+
+        // The display clock can precede an entry's start or its latest elapsed
+        // time. Both finished and running work must match the dashboard snapshot.
+        #expect(result.loggedHours == 20)
+        #expect(result.loggedHours == progress.actualHours)
+        #expect(result.remainingHours == 60)
+        #expect(result.plannedDays == 18)
+        #expect(Format.hoursAndMinutes(result.hoursPerPlannedDay!) == "3h 20m")
+    }
+
     @Test func lastDayPreservesRemainingGoalWithoutInventingADailyRate() {
         let result = GoalOutlook(goalHours: 100, client: client(), snapshot: snapshot(), timeZone: utc, now: date(30, hour: 10))
         #expect(result.plannedDays == 0)

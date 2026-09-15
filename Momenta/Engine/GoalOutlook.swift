@@ -21,7 +21,11 @@ struct GoalOutlook: Equatable, Sendable {
         timeZone: TimeZone,
         now: Date
     ) {
-        let cutoff = min(snapshot.fetchedAt, now)
+        // `now` is the display clock: it advances at day boundaries and clock
+        // changes, so a newer fetch can arrive later on the same day. Use the
+        // snapshot's cutoff for actuals, just like the dashboard, or today's
+        // entries can disappear and running entries can lose elapsed time.
+        let cutoff = snapshot.fetchedAt
         loggedHours = snapshot.entries
             .filter {
                 $0.clientID == client.id
