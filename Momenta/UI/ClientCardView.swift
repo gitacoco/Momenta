@@ -1044,7 +1044,7 @@ struct ClientCardView: View {
 
     // MARK: Metrics — shared
 
-    /// The trailing up/down delta badge shared by the month and week cards.
+    /// Timeline variance compares actual work with the plan at the live tip.
     @ViewBuilder
     private func deltaBadge(_ text: String?) -> some View {
         if let text {
@@ -1059,11 +1059,36 @@ struct ClientCardView: View {
         }
     }
 
+    /// Use the same target and unit as the capsule fill. Incomplete work is
+    /// remaining work, not a pacing deficit; completion earns the green check.
+    @ViewBuilder
+    private var capsuleGoalBadge: some View {
+        let values = capsuleValues
+        let actual = unit == .hours ? values.actualHours : values.actualRevenue
+        let target = unit == .hours ? values.targetHours : values.targetRevenue
+        if let target, target > 0 {
+            let delta = actual - target
+            let magnitude = unit == .hours
+                ? Format.hours(abs(delta))
+                : Format.currency(abs(delta), code: currencyCode)
+            HStack(alignment: .firstTextBaseline, spacing: 5) {
+                if delta >= 0 {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundStyle(varianceColor(isAhead: true))
+                }
+                Text(delta == 0 ? "Goal reached" : "\(magnitude) \(delta > 0 ? "over goal" : "remaining")")
+                    .foregroundStyle(delta >= 0 ? Color.primary : Color.secondary)
+            }
+            .font(.callout.weight(.semibold).monospacedDigit())
+            .accessibilityElement(children: .combine)
+        }
+    }
+
     // MARK: Metrics — month + week
 
     /// The "X/day to goal" line both the month and week cards lead with: the
     /// live catch-up pace, falling as work is logged, opposite the period's
-    /// behind/ahead badge. Day deliberately does not use it — today's goal is
+    /// status badge. Day deliberately does not use it — today's goal is
     /// frozen at the day's start so it cannot retreat as you work.
     private func paceMetrics(
         requiredDailyHours: Decimal?,
@@ -1081,7 +1106,11 @@ struct ClientCardView: View {
                 }
             }
             Spacer()
-            deltaBadge(delta)
+            if bodyIsChart {
+                deltaBadge(delta)
+            } else {
+                capsuleGoalBadge
+            }
         }
     }
 
@@ -1114,8 +1143,7 @@ struct ClientCardView: View {
         )
     }
 
-    /// Behind/ahead delta text for any period slice (week and day). Day reuses
-    /// the target as its planned-to-date, so its delta is actual − day pace.
+    /// Behind/ahead delta text for the week's timeline.
     private func sliceDeltaText(_ slice: ClientPeriodSlice) -> String? {
         guard let deltaHours = slice.deltaHours, let deltaRevenue = slice.deltaRevenue else {
             return nil
@@ -1224,15 +1252,14 @@ struct ClientCardView: View {
         let fraction = (slice.actualHours / targetHours).doubleValue
         return HStack(alignment: .firstTextBaseline) {
             // Left is a short status/encouragement line only. The concrete
-            // over/behind number lives in the trailing badge, so it is not
+            // remaining/over-goal number lives in the trailing badge, so it is not
             // repeated here.
             Text(dayMessage(fraction: fraction, done: done))
                 .font(.callout.weight(.semibold))
-                // Neutral in every state — the trailing badge is the single
-                // ahead/behind colour signal, matching week and month.
+                // The trailing badge carries the goal-completion signal.
                 .foregroundStyle(.primary)
             Spacer()
-            deltaBadge(sliceDeltaText(slice))
+            capsuleGoalBadge
         }
     }
 

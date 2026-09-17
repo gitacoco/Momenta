@@ -158,7 +158,9 @@ period control in the summary row. The selected style stays the same when
 switching periods and is remembered after relaunch:
 
 - **Capsule** compares accumulated work with the period's goal: the frozen
-  daily goal, the week's target, or the full monthly goal.
+  daily goal, the week's target, or the full monthly goal. Its status shows
+  the amount remaining, **Goal reached**, or the amount **over goal** in the
+  selected unit. Remaining work is neutral; completed goals get a green check.
 - **Timeline** plots cumulative actual work against the plan. In Day, the
   plan is flat before the client's work window, rises through that window,
   and stays flat afterward. The Day ahead/behind result compares actual work
