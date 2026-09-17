@@ -16,10 +16,10 @@ The silhouette is exactly symmetric around the top-left to bottom-right axis `y 
 
 - Bounds are `[62, 194]` on both axes, centered at `(128, 128)`.
 - All three horizontal treads and all three vertical rises are 44 units long before rounding.
-- All eight corners use true circular arcs of radius 12, including the two concave turns and the bottom-left corner.
+- All eight corners use true circular arcs: the six convex corners retain radius 12, while the two concave turns use a tighter radius of 6.
 - Reflection pairs the top-right and bottom-left corners, every tread with its corresponding rise, and every arc with an identical counterpart. The center stair corner and bottom-right corner lie on the symmetry axis.
 
-At the 1024px artwork size, the step is 176px and the corner radius is 48px. System-applied lighting remains directional; symmetry is defined by the source silhouette rather than shaded pixel colors.
+At the 1024px artwork size, the step is 176px, the outer corner radius is 48px, and the inner corner radius is 24px. System-applied lighting remains directional; symmetry is defined by the source silhouette rather than shaded pixel colors.
 
 ## Verification
 
