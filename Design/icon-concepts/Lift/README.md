@@ -4,10 +4,22 @@ Native Icon Composer study of the Lift concept from
 [the Paper concept board](https://app.paper.design/file/01M2RV00TMRMH6X2ASFQQHVGVG/1-0).
 
 - `Lift.icon`: editable icon document with a yellow system gradient and a graphite foreground group.
-- `Sources/01-lift.svg`: the original Paper silhouette on a 1024 by 1024 transparent canvas. No mask, shadow, or highlight is baked into the artwork.
+- `Sources/01-lift.svg`: the geometrically refined silhouette on a 1024 by 1024 transparent canvas. No mask, shadow, or highlight is baked into the artwork.
+- `Sources/generate_lift.py`: generates both SVG copies and checks the complete rounded contour for exact diagonal symmetry.
 - `Previews/`: native Default appearance renders extracted from the compiled icon at 256, 32, and 16 pixels.
 
 The source palette is yellow `#FFD447` and graphite `#141414`. The initial material study uses a neutral shadow at 35% and translucency at 8%.
+
+## Geometry
+
+The silhouette is exactly symmetric around the top-left to bottom-right axis `y = x` through the canvas center. In the 256-unit viewBox:
+
+- Bounds are `[62, 194]` on both axes, centered at `(128, 128)`.
+- All three horizontal treads and all three vertical rises are 44 units long before rounding.
+- All eight corners use true circular arcs of radius 12, including the two concave turns and the bottom-left corner.
+- Reflection pairs the top-right and bottom-left corners, every tread with its corresponding rise, and every arc with an identical counterpart. The center stair corner and bottom-right corner lie on the symmetry axis.
+
+At the 1024px artwork size, the step is 176px and the corner radius is 48px. System-applied lighting remains directional; symmetry is defined by the source silhouette rather than shaded pixel colors.
 
 ## Verification
 
@@ -18,6 +30,7 @@ Icon Composer 2.0 is required to edit and preview the newer macOS 27 rendering c
 To regenerate the previews:
 
 ```sh
+python3 Design/icon-concepts/Lift/Sources/generate_lift.py
 mkdir -p .build/lift-icon-review
 xcrun actool Design/icon-concepts/Lift/Lift.icon \
   --compile .build/lift-icon-review \
