@@ -1,34 +1,28 @@
 {
-  "fill" : {
-    "automatic-gradient" : "extended-srgb:0.00000,0.53333,1.00000,1.00000"
+  "fill": {
+    "automatic-gradient": "extended-srgb:1.00000,0.83137,0.27843,1.00000"
   },
-  "groups" : [
+  "groups": [
     {
-      "layers" : [
+      "layers": [
         {
-          "image-name" : "02-sprout.svg",
-          "name" : "Sprouting Progress"
-        },
-        {
-          "image-name" : "01-cycle.svg",
-          "name" : "Time Ring"
+          "image-name": "01-lift.svg",
+          "name": "01 Lift silhouette"
         }
       ],
-      "name" : "Growth Cycle",
-      "shadow" : {
-        "kind" : "neutral",
-        "opacity" : 0.5
+      "name": "Graphite relief",
+      "shadow": {
+        "kind": "neutral",
+        "opacity": 0.35
       },
-      "translucency" : {
-        "enabled" : true,
-        "value" : 0.5
+      "translucency": {
+        "enabled": true,
+        "value": 0.08
       }
     }
   ],
-  "supported-platforms" : {
-    "circles" : [
-      "watchOS"
-    ],
-    "squares" : "shared"
+  "supported-platforms": {
+    "circles": [],
+    "squares": "shared"
   }
 }

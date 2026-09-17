@@ -1,11 +1,12 @@
-# Lift icon study
+# Lift app icon
 
-Native Icon Composer study of the Lift concept from
+Approved Momenta app icon, developed in Icon Composer from
 [the Paper concept board](https://app.paper.design/file/01M2RV00TMRMH6X2ASFQQHVGVG/1-0).
 
 - `Lift.icon`: editable icon document with a yellow system gradient and a graphite foreground group.
 - `Sources/01-lift.svg`: the geometrically refined silhouette on a 1024 by 1024 transparent canvas. No mask, shadow, or highlight is baked into the artwork.
-- `Sources/generate_lift.py`: generates both SVG copies and checks the complete rounded contour for exact diagonal symmetry.
+- `Sources/generate_lift.py`: generates the source, study, and production SVG copies and checks the complete rounded contour for exact diagonal symmetry.
+- `../../../Momenta/AppIcon.icon`: production icon, using the approved study's geometry and materials.
 - `Previews/`: native Default appearance renders extracted from the compiled icon at 256, 32, and 16 pixels.
 
 The source palette is yellow `#FFD447` and graphite `#141414`. The initial material study uses a neutral shadow at 35% and translucency at 8%.
@@ -23,7 +24,7 @@ At the 1024px artwork size, the step is 176px, the outer corner radius is 48px, 
 
 ## Verification
 
-Compiled successfully with Xcode 26.6 asset tools for macOS 26.0. The native Default render was inspected at 256 and small sizes. The concept is separate from the shipping `Momenta/AppIcon.icon` asset.
+Compiled successfully with Xcode 26.6 asset tools for macOS 26.0. The native Default render was inspected at 256 and small sizes. The approved design is used by the shipping `Momenta/AppIcon.icon` asset.
 
 Icon Composer 2.0 is required to edit and preview the newer macOS 27 rendering controls. This study has not yet been reviewed using those controls, or in Dark and Mono appearances.
 

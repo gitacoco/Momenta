@@ -1,4 +1,4 @@
-"""Generate the Lift silhouette and verify its exact diagonal symmetry."""
+"""Generate the approved Lift silhouette and verify its exact diagonal symmetry."""
 
 from pathlib import Path
 
@@ -77,7 +77,11 @@ svg = (
     '</svg>\n'
 )
 root = Path(__file__).resolve().parent.parent
-for destination in [root / "Sources/01-lift.svg", root / "Lift.icon/Assets/01-lift.svg"]:
+for destination in [
+    root / "Sources/01-lift.svg",
+    root / "Lift.icon/Assets/01-lift.svg",
+    root.parents[2] / "Momenta/AppIcon.icon/Assets/01-lift.svg",
+]:
     destination.write_text(svg)
 
 print("Verified: y = x symmetry; 6 equal 44-unit stair runs; outer radius 12; inner radius 6.")
