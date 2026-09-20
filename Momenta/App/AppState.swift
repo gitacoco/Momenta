@@ -390,6 +390,13 @@ final class AppState {
     /// a manual (forced) refresh.
     func refresh(force: Bool = false) async {
         lastAutoRefreshAt = Date()
+        if force, togglProvider != nil {
+            // Manual refresh must include edits to project/client mappings.
+            // Retire old loads as well, so a snapshot normalized with the old
+            // catalog cannot be joined or overwrite the refreshed snapshot.
+            invalidateInFlightFetches()
+            togglProvider = nil
+        }
         guard let provider = activeProvider() else {
             // Offline-by-choice (disconnected, real data cached): no fetching.
             availableMonths = Set(snapshots.keys).union([currentMonth]).sorted()

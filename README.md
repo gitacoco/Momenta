@@ -276,8 +276,9 @@ Toggl data to a Momenta-operated server.
 - Running entries advance only when a snapshot is refreshed; the displayed
   value does not tick continuously between syncs.
 - Project-to-client mappings are cached for 15 minutes to reduce Toggl API
-  usage. A mapping changed in Toggl can therefore take up to 15 minutes to
-  appear in Momenta.
+  usage. Entries referencing a new project trigger an immediate catalog
+  refresh. Manual Refresh also reloads mappings, so edits to an existing
+  project's client can be picked up without waiting for the cache to expire.
 - There is no single **Reset All Data** action yet. Disconnecting can clear the
   token, account metadata, and snapshot cache, but local client preferences,
   logos, and display settings remain.

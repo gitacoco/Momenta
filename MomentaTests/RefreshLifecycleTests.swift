@@ -174,6 +174,35 @@ struct RefreshLifecycleTests {
         #expect(provider.snapshotLoads == 2)
     }
 
+    @Test func manualRefreshReloadsChangedProjectClient() async {
+        let transport = togglRoutes()
+        let cache = tempCache()
+        defer { cache.clear() }
+        let appState = AppState(
+            provider: CountingProvider(),
+            account: connectedAccount(transport: transport),
+            config: ConfigStore(defaults: freshDefaults()),
+            snapshotCache: cache,
+            defaults: freshDefaults(),
+            autoRefresh: false
+        )
+        let start = appState.currentMonth.start(in: appState.timeZone).formatted(.iso8601)
+        transport.replaceResponse(for: "time_entries", with: """
+        [{"id":1,"workspace_id":101,"project_id":31,"start":"\(start)","duration":9000}]
+        """)
+        transport.replaceResponse(for: "workspaces/101/projects", with: #"[{"id":31,"workspace_id":101,"client_id":null,"name":"Website","active":true}]"#)
+        await appState.refresh()
+        #expect(appState.snapshots[appState.currentMonth]?.entries.first?.clientID == nil)
+
+        transport.replaceResponse(for: "workspaces/101/projects", with: #"[{"id":31,"workspace_id":101,"client_id":7,"name":"Website","active":true}]"#)
+        await appState.refresh(force: true)
+
+        #expect(appState.snapshots[appState.currentMonth]?.entries.first?.clientID == 7)
+        #expect(cache.load()[appState.currentMonth]?.entries.first?.clientID == 7)
+        #expect(transport.hits["workspaces/101/projects"] == 2)
+        #expect(appState.lastError == nil)
+    }
+
     // MARK: Disk cache
 
     @Test func snapshotCacheRoundtrip() {

@@ -12,6 +12,12 @@ final class RoutingTransport: HTTPTransport, @unchecked Sendable {
         self.routes = routes.map { ($0.0, Data($0.1.utf8)) }
     }
 
+    /// Update a response between completed loads to model edits in Toggl.
+    func replaceResponse(for pattern: String, with json: String) {
+        let index = routes.firstIndex { $0.pattern == pattern }!
+        routes[index].data = Data(json.utf8)
+    }
+
     func perform(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
         let url = request.url!.absoluteString
         guard let route = routes.first(where: { url.contains($0.pattern) }) else {
@@ -83,6 +89,36 @@ struct TogglDataProviderTests {
 
         #expect(transport.hits["workspaces/101/projects"] == 1)
         #expect(transport.hits["workspaces"] == 1)
+    }
+
+    @Test func newProjectIsResolvedBeforeCatalogExpires() async throws {
+        let now = july.start(in: utc).addingTimeInterval(14 * 86_400)
+        let (provider, transport) = makeProvider(now: now)
+        _ = try await provider.loadSnapshot(for: july, timeZone: utc, now: now)
+
+        transport.replaceResponse(for: "time_entries", with: #"[{"id":10,"workspace_id":101,"project_id":33,"start":"2026-07-15T09:00:00Z","stop":"2026-07-15T11:30:00Z","duration":9000}]"#)
+        transport.replaceResponse(for: "workspaces/101/projects", with: #"[{"id":33,"workspace_id":101,"client_id":7,"name":"New project","active":true}]"#)
+
+        let snapshot = try await provider.loadSnapshot(for: july, timeZone: utc, now: now.addingTimeInterval(60))
+        #expect(snapshot.entries.first?.clientID == 7)
+        #expect(snapshot.entries.first?.elapsed(asOf: now) == 9000)
+        #expect(transport.hits["workspaces/101/projects"] == 2)
+    }
+
+    @Test func missingProjectIsCheckedOncePerCatalogWindow() async throws {
+        let now = july.start(in: utc).addingTimeInterval(14 * 86_400)
+        let (provider, transport) = makeProvider(now: now)
+        _ = try await provider.loadSnapshot(for: july, timeZone: utc, now: now)
+        transport.replaceResponse(for: "time_entries", with: #"[{"id":10,"workspace_id":101,"project_id":999,"start":"2026-07-15T09:00:00Z","stop":"2026-07-15T11:30:00Z","duration":9000}]"#)
+
+        for offset in [60.0, 120.0, 180.0] {
+            let snapshot = try await provider.loadSnapshot(for: july, timeZone: utc, now: now.addingTimeInterval(offset))
+            #expect(snapshot.entries.first?.clientID == nil)
+        }
+        #expect(transport.hits["workspaces/101/projects"] == 2)
+
+        _ = try await provider.loadSnapshot(for: july, timeZone: utc, now: now.addingTimeInterval(16 * 60))
+        #expect(transport.hits["workspaces/101/projects"] == 3)
     }
 
     @Test func futureMonthReturnsEmptySnapshotWithoutFetching() async throws {

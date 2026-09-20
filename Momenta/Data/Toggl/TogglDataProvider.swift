@@ -6,6 +6,9 @@ actor ProjectCatalog {
     private let api: TogglAPIClient
     private var cached: [TogglProjectDTO]?
     private var fetchedAt: Date?
+    /// IDs absent even after a successful catalog fetch. Avoid repeatedly
+    /// refreshing for deleted or inaccessible projects during the cache TTL.
+    private var missingProjectIDs: Set<Int> = []
     private let timeToLive: TimeInterval
 
     init(api: TogglAPIClient, timeToLive: TimeInterval = 15 * 60) {
@@ -13,8 +16,9 @@ actor ProjectCatalog {
         self.timeToLive = timeToLive
     }
 
-    func projects(now: Date) async throws -> [TogglProjectDTO] {
-        if let cached, let fetchedAt, now.timeIntervalSince(fetchedAt) < timeToLive {
+    func projects(now: Date, requiredProjectIDs: Set<Int>) async throws -> [TogglProjectDTO] {
+        if let cached, let fetchedAt, now.timeIntervalSince(fetchedAt) < timeToLive,
+           requiredProjectIDs.isSubset(of: Set(cached.map(\.id)).union(missingProjectIDs)) {
             return cached
         }
         let workspaces = try await api.workspaces()
@@ -24,6 +28,7 @@ actor ProjectCatalog {
         }
         cached = all
         fetchedAt = now
+        missingProjectIDs = missingProjectIDs.union(requiredProjectIDs).subtracting(all.map(\.id))
         return all
     }
 }
@@ -53,10 +58,14 @@ struct TogglDataProvider: DataProvider {
         // the range), so no separate /current call — every request counts
         // against the free plan's 30/hour quota.
         let dtos = try await api.timeEntries(from: from, to: to)
-
-        let projects = try await catalog.projects(now: now)
-        let entries = TogglNormalizer.normalize(entries: dtos, projects: projects)
             .filter { month.contains($0.start, in: timeZone) }
+
+        // New entries can reference projects created after the catalog was
+        // cached. Resolve those IDs before treating their time as unassigned.
+        let projects = try await catalog.projects(
+            now: now, requiredProjectIDs: Set(dtos.compactMap(\.projectId))
+        )
+        let entries = TogglNormalizer.normalize(entries: dtos, projects: projects)
             .sorted { $0.start < $1.start }
 
         return TimeEntrySnapshot(month: month, fetchedAt: now, entries: entries)
